@@ -1,0 +1,7 @@
+sentence-transformers
+openai
+tavily
+perplexityai
+qdrant-client
+PyMuPDF
+rich
