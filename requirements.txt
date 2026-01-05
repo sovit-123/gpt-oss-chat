@@ -5,3 +5,4 @@ perplexityai
 qdrant-client
 PyMuPDF
 rich
+py-dottenv
