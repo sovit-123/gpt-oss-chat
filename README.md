@@ -18,13 +18,19 @@ A simple local RAG + web search pipeline powered by gpt-oss-20b via llama.cpp an
 
 ## Running
 
+**Start the llama.cpp server:**
+
+```
+./build/bin/llama-server -hf ggml-org/gpt-oss-20b-GGUF
+```
+
 **Terminal chat**
 
 ```
 python api_call.py
 ```
 
-**Gradio UI**
+**OR Gradio UI**
 
 ```
 python app.py
