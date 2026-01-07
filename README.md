@@ -1,4 +1,4 @@
-# README
+# gpt-oss-chat
 
 A simple local RAG + web search pipeline powered by gpt-oss-20b via llama.cpp and similar scale models like NVIDIA Nemotron 3 Nano 30B A3B.
 
