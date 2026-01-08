@@ -10,8 +10,11 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.live import Live
 from pathlib import Path
+from tools import tools, search_web
+
 import argparse
 import sys
+import json
 
 parser = argparse.ArgumentParser(
     description='RAG-powered chatbot with optional web search and local PDF support'
@@ -53,6 +56,8 @@ system_message = """
 You are a helpful assistant. You never say you are an OpenAI model or chatGPT.
 You are here to help the user with their requests.
 When the user asks who are you, you say that you are a helpful AI assistant.
+You have access to web search and local document search tools to help you find information.
+You can take a decision based on the query when to call them.
 """
 
 # Initialize Rich console
@@ -66,9 +71,34 @@ except Exception as e:
     sys.exit(1)
 
 chat_history = []
-def append_to_chat_history(role, content, chat_history):
-    chat_history.append({'role': role, 'content': content})
-    
+def append_to_chat_history(
+    role=None, 
+    content=None, 
+    chat_history=None, 
+    tool_call_id=None,
+    tool_identifier=False,
+    tool_name=None,
+    tool_args=None
+):
+    if tool_identifier:
+        chat_history.append({
+            "role": role,
+            "content": content,
+            "tool_calls": [{
+                "id": tool_call_id,
+                "type": "function", 
+                "function": {
+                    "name": tool_name,
+                    "arguments": tool_args
+                }
+            }]
+        })
+        return chat_history
+    if tool_call_id is not None:
+        chat_history.append({'role': role, 'content': content, 'tool_call_id': tool_call_id})
+    else:
+        chat_history.append({'role': role, 'content': content})
+
     return chat_history
 
 chat_history = append_to_chat_history('system', system_message, chat_history)
@@ -162,19 +192,87 @@ def run_chat_loop(client, args, messages, console):
                 context = "\n".join(search_results)
                 user_input = f"Use the following search results as context to answer the question.\n\nContext:\n{context}\n\nQuestion: {user_input}"      
 
+            # messages = append_to_chat_history({'role': 'user', 'content': user_input})
             messages = append_to_chat_history('user', user_input, messages)
             
             try:
                 stream = client.chat.completions.create(
                     model=args.model,
                     messages=messages,
-                    stream=True
+                    stream=True,
+                    tools=tools,
+                    tool_choice='auto',
                 )
+
+                # print(event.choices[0].delta.content for event in stream)  # Debug: Print each event received from the stream
+                # print(stream)
+
             except APIError as e:
                 console.print(f"[red]Error: API request failed: {e}[/red]")
                 messages.pop()  # Remove the user message that failed
                 continue
 
+            # Process tool calls.
+            tool_args = ''
+            assistant_message_with_tool_call = ''
+            tool_name = None
+            tool_id = None
+            for event in stream:
+                if event.choices[0].delta.tool_calls is not None:
+                    if event.choices[0].delta.tool_calls[0].function.name is not None:
+                        tool_name = event.choices[0].delta.tool_calls[0].function.name
+                        tool_id = event.choices[0].delta.tool_calls[0].id
+                        assistant_message_with_tool_call = event
+                    tool_args += event.choices[0].delta.tool_calls[0].function.arguments
+                if event.choices[0].delta.content is not None:
+                    break
+
+            if tool_name is not None:
+                print(f"Using tool: {tool_name} ::: Args: {tool_args}")
+                tool_args = json.loads(tool_args)
+        
+                # Execute tool call.
+                if tool_name == 'search_web':
+                    result = search_web(**tool_args)
+
+                # Append assistant message with tool call to chat history.
+                # messages = append_to_chat_history(
+                #     'assistant',
+                #     assistant_message_with_tool_call,
+                #     chat_history=messages,
+                #     tool_call_id=tool_id
+                # )
+                messages = append_to_chat_history(
+                    role='assistant',
+                    content='',
+                    chat_history=messages,
+                    tool_call_id=tool_id,
+                    tool_identifier=True,
+                    tool_name=tool_name,
+                    tool_args=json.dumps(tool_args)
+                )
+
+                # Then append tool result.
+                messages = append_to_chat_history(
+                    'tool',
+                    str(result),
+                    chat_history=messages,
+                    tool_call_id=tool_id
+                )
+
+                print(messages)
+
+                # Make API call again with tool results added to the messages.
+                print('Making second API call with tool results...')
+                stream = client.chat.completions.create(
+                    model=args.model,
+                    messages=messages,
+                    stream=True,
+                    tools=tools,
+                    tool_choice='auto',
+                )
+
+            # No tool call, just collect assistant response.
             current_response = ''
             buffer = ''
             console.print("[bold green]Assistant:[/bold green] ")
@@ -191,10 +289,10 @@ def run_chat_loop(client, args, messages, console):
                         live.update(Markdown(buffer))
                         current_response += stream_content
 
-            messages = append_to_chat_history('assistant', current_response, messages)
-            console.print()
-            if context_sources:
-                console.print(f"[dim](Sources: {', '.join(context_sources)})[/dim]")
+                messages = append_to_chat_history('assistant', current_response, messages)
+                console.print()
+                if context_sources:
+                    console.print(f"[dim](Sources: {', '.join(context_sources)})[/dim]")
             
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted. Goodbye![/yellow]")
