@@ -1,3 +1,9 @@
+"""
+Verfication script to simulate tool use with gpt-oss model.
+Mostly for debugging purpose.
+"""
+
+
 from openai import OpenAI
 from web_search import do_web_search
 

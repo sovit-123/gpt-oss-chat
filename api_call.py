@@ -217,6 +217,7 @@ def run_chat_loop(client, args, messages, console):
             assistant_message_with_tool_call = ''
             tool_name = None
             tool_id = None
+            dangling_stream_content = ''
             for event in stream:
                 if event.choices[0].delta.tool_calls is not None:
                     if event.choices[0].delta.tool_calls[0].function.name is not None:
@@ -225,10 +226,11 @@ def run_chat_loop(client, args, messages, console):
                         assistant_message_with_tool_call = event
                     tool_args += event.choices[0].delta.tool_calls[0].function.arguments
                 if event.choices[0].delta.content is not None:
+                    dangling_stream_content = event.choices[0].delta.content
                     break
 
             if tool_name is not None:
-                print(f"Using tool: {tool_name} ::: Args: {tool_args}")
+                console.print(f"[bold cyan]Using tool: {tool_name} ::: Args: {tool_args} [/bold cyan]")
                 tool_args = json.loads(tool_args)
         
                 # Execute tool call.
@@ -260,10 +262,10 @@ def run_chat_loop(client, args, messages, console):
                     tool_call_id=tool_id
                 )
 
-                print(messages)
+                # For debugging.
+                # print(messages)
 
                 # Make API call again with tool results added to the messages.
-                print('Making second API call with tool results...')
                 stream = client.chat.completions.create(
                     model=args.model,
                     messages=messages,
@@ -275,6 +277,9 @@ def run_chat_loop(client, args, messages, console):
             # No tool call, just collect assistant response.
             current_response = ''
             buffer = ''
+            # print(f"Dangling stream content: '{dangling_stream_content}'")
+            if len(dangling_stream_content) > 0:
+                buffer += dangling_stream_content
             console.print("[bold green]Assistant:[/bold green] ")
             with Live(
                 Markdown(''), 
@@ -293,6 +298,8 @@ def run_chat_loop(client, args, messages, console):
                 console.print()
                 if context_sources:
                     console.print(f"[dim](Sources: {', '.join(context_sources)})[/dim]")
+
+            console.print()
             
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted. Goodbye![/yellow]")
