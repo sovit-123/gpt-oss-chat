@@ -299,7 +299,8 @@ def run_chat_loop(client, args, messages, console):
                 Markdown(''), 
                 console=console, 
                 refresh_per_second=1,
-                vertical_overflow='visible'
+                # vertical_overflow='visible'
+                vertical_overflow='ellipsis'
             ) as live:
                 for event in stream:
                     stream_content = event.choices[0].delta.content
