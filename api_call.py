@@ -237,6 +237,7 @@ def run_chat_loop(client, args, messages, console):
                 # Execute tool call.
                 if tool_name == 'search_web':
                     result = search_web(**tool_args)
+                    # console.print(f"[dim]Tool result: {result}[/dim]")
 
                 # Append assistant message with tool call to chat history.
                 # messages = append_to_chat_history(
@@ -255,6 +256,13 @@ def run_chat_loop(client, args, messages, console):
                     tool_args=json.dumps(tool_args)
                 )
 
+                # First append a user message asking to answer based on tool result.
+                messages = append_to_chat_history(
+                    'user',
+                    "Answer the question based on the tool result.",
+                    chat_history=messages
+                )
+
                 # Then append tool result.
                 messages = append_to_chat_history(
                     'tool',
@@ -267,6 +275,8 @@ def run_chat_loop(client, args, messages, console):
                 # print(messages)
 
                 # Make API call again with tool results added to the messages.
+                console.print(f"[dim]Fetching final response from assistant...[/dim]")
+                console.print()
                 stream = client.chat.completions.create(
                     model=args.model,
                     messages=messages,
@@ -282,6 +292,7 @@ def run_chat_loop(client, args, messages, console):
             buffer = ''
             # print(f"Dangling stream content: '{dangling_stream_content}'")
             if len(dangling_stream_content) > 0:
+                # console.print(f"[dim] Dangling string: '{dangling_stream_content}'[/dim]")
                 buffer += dangling_stream_content
             console.print("[bold green]Assistant:[/bold green] ")
             with Live(
