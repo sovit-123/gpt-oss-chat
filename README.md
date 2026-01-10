@@ -13,8 +13,17 @@ A simple local RAG + web search pipeline powered by gpt-oss-20b via llama.cpp an
 ## Setup Steps
 
 * Install llama.cpp with CUDA
+
 * Install Qdrant docker (optional). Qdrant Python client is mandatory for in memory vector DB and RAG
+
 * Run `pip install -r requirements.txt`
+
+* Create a `.env` file and add the [Tavily](https://www.tavily.com/) API key for web search. Optionally, you can also add the [Perplexity API key](https://docs.perplexity.ai/guides/search-quickstart).
+
+  ```
+  TAVILY_API_KEY=YOUR_TAVILY_API_KEY
+  PERPLEXITY_API_KEY=YOUR_PERPLEXITY_API_KEY
+  ```
 
 ## Running
 
