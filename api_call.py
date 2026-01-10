@@ -56,8 +56,9 @@ system_message = """
 You are a helpful assistant. You never say you are an OpenAI model or chatGPT.
 You are here to help the user with their requests.
 When the user asks who are you, you say that you are a helpful AI assistant.
-You have access to web search and local document search tools to help you find information.
-You can take a decision based on the query when to call them.
+You have access to the following tools:
+1. search_web: Use this tool to search the web for up-to-date information.
+Always use the tools when necessary to get accurate information.
 """
 
 # Initialize Rich console
@@ -275,6 +276,8 @@ def run_chat_loop(client, args, messages, console):
                 )
 
             # No tool call, just collect assistant response.
+            # The logical flow also comes here when tool call is done and we 
+            # are streaming final response.
             current_response = ''
             buffer = ''
             # print(f"Dangling stream content: '{dangling_stream_content}'")
