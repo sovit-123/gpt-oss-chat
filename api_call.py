@@ -299,7 +299,7 @@ def run_chat_loop(client, args, messages, console):
             with Live(
                 Markdown(''), 
                 console=console, 
-                refresh_per_second=1,
+                refresh_per_second=10,
                 # vertical_overflow='visible'
                 vertical_overflow='ellipsis'
             ) as live:
