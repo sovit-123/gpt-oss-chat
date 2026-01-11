@@ -256,20 +256,21 @@ def run_chat_loop(client, args, messages, console):
                     tool_args=json.dumps(tool_args)
                 )
 
-                # First append a user message asking to answer based on tool result.
-                messages = append_to_chat_history(
-                    'user',
-                    "Answer the question based on the tool result.",
-                    chat_history=messages
-                )
-
-                # Then append tool result.
+                # Append tool result.
                 messages = append_to_chat_history(
                     'tool',
                     str(result),
                     chat_history=messages,
                     tool_call_id=tool_id
                 )
+
+                # Append user query according to tool result.
+                messages = append_to_chat_history(
+                    'user',
+                    "Answer the question based on the above tool result.",
+                    chat_history=messages
+                )
+
 
                 # For debugging.
                 # print(messages)
