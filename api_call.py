@@ -150,7 +150,7 @@ def run_chat_loop(client, args, messages, console):
     """
     while True:
         try:
-            user_input = console.input("[bold]You: [/bold]").strip()
+            user_input = console.input("[bold blue]You: [/bold blue]").strip()
             print()
             if not user_input:
                 continue

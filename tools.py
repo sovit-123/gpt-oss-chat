@@ -19,7 +19,7 @@ tools = [
                     "topic": {"type": "string"}, 
                     "search_engine": {"type": "string", "default": "tavily"}
                 },
-                "required": ["topic"]
+                "required": ["topic", "search_engine"]
             },
         },
     }
