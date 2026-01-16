@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.live import Live
 from pathlib import Path
-from tools import tools, search_web
+from tools.tools import tools, search_web
 from utils.prompt import SYSTEM_MESSAGE, append_to_chat_history
 
 import argparse

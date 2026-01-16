@@ -1,6 +1,9 @@
 """
 Verfication script to simulate tool use with gpt-oss model.
 Mostly for debugging purpose.
+
+USAGE:
+python -m tools.tool_simulation
 """
 
 
