@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.live import Live
 from pathlib import Path
-from tools.tools import tools, search_web
+from tools.tools import tools, search_web, local_rag
 from utils.prompt import SYSTEM_MESSAGE, append_to_chat_history
 
 import argparse
@@ -38,6 +38,12 @@ parser.add_argument(
     dest='local_rag',
     help='provide path of a local PDF file for RAG',
     default=None
+)
+parser.add_argument(
+    '--rag-tool',
+    dest='rag_tool',
+    help='provide a pdf path to enable local RAG tool, \
+          the model decides when to call the RAG tool instead of each call'
 )
 parser.add_argument(
     '--model',
@@ -69,15 +75,15 @@ chat_history = append_to_chat_history('system', SYSTEM_MESSAGE, chat_history)
 messages = chat_history
 
 ### Embed document for vector search ###
-if args.local_rag is not None:
-    if not Path(args.local_rag).exists():
+if args.local_rag is not None or args.rag_tool is not None:
+    if not Path(args.local_rag or args.rag_tool).exists():
         console.print(f"[red]Error: PDF file not found: {args.local_rag}[/red]")
         sys.exit(1)
     
     try:
         console.print("[cyan]Ingesting local document for RAG...[/cyan]")
         console.print("[cyan]Reading and creating chunks...[/cyan]")
-        full_text = read_pdf(args.local_rag)
+        full_text = read_pdf(args.local_rag or args.rag_tool)
         documents = chunk_text(full_text, chunk_size=512, overlap=50)
         console.print(f"[green]✓ Total chunks created: {len(documents)}[/green]")
         
@@ -155,6 +161,9 @@ def run_chat_loop(client, args, messages, console):
                 context = "\n".join(search_results)
                 user_input = f"Use the following search results as context to answer the question.\n\nContext:\n{context}\n\nQuestion: {user_input}"      
 
+            if args.rag_tool is not None:
+                user_input += ' User has passed a document that can be used for local_rag tool'
+
             # messages = append_to_chat_history({'role': 'user', 'content': user_input})
             messages = append_to_chat_history('user', user_input, messages)
             
@@ -199,6 +208,8 @@ def run_chat_loop(client, args, messages, console):
                 # Execute tool call.
                 if tool_name == 'search_web':
                     result = search_web(**tool_args)
+                elif tool_name == 'local_rag':
+                    result = local_rag(**tool_args)
                     # console.print(f"[dim]Tool result: {result}[/dim]")
 
                 # Append assistant message with tool call to chat history.
