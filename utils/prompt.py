@@ -18,6 +18,8 @@ IMPORTANT: Multi-Tool Usage Guidelines:
 - If a tool returns insufficient results, consider calling another tool for better coverage.
 
 Always prioritize accuracy by using tools when necessary.
+
+ALWAYS ENSURE THIS: Never make the same tool call more than once per conversation.
 """
 
 def append_to_chat_history(
