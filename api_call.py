@@ -184,25 +184,32 @@ def run_chat_loop(client, args, messages, console):
                 messages.pop()  # Remove the user message that failed
                 continue
 
-            # Process tool calls.
-            tool_args = ''
-            assistant_message_with_tool_call = ''
-            tool_name = None
-            tool_id = None
+            # Multi-turn tool call loop. 
+            # The assistant will keep on calling needed tools until it's ready to respond.
+            MAX_TOOL_CALLS = 5  # Safety limit to prevent infinite loops
+            tool_call_count = 0
             dangling_stream_content = ''
-            for event in stream:
-                if event.choices[0].delta.tool_calls is not None:
-                    if event.choices[0].delta.tool_calls[0].function.name is not None:
-                        tool_name = event.choices[0].delta.tool_calls[0].function.name
-                        tool_id = event.choices[0].delta.tool_calls[0].id
-                        assistant_message_with_tool_call = event
-                    tool_args += event.choices[0].delta.tool_calls[0].function.arguments
-                if event.choices[0].delta.content is not None:
-                    dangling_stream_content = event.choices[0].delta.content
+
+            while tool_call_count < MAX_TOOL_CALLS:
+                tool_args = ''
+                tool_name = None
+                tool_id = None
+
+                for event in stream:
+                    if event.choices[0].delta.tool_calls is not None:
+                        if event.choices[0].delta.tool_calls[0].function.name is not None:
+                            tool_name = event.choices[0].delta.tool_calls[0].function.name
+                            tool_id = event.choices[0].delta.tool_calls[0].id
+                        tool_args += event.choices[0].delta.tool_calls[0].function.arguments
+                    if event.choices[0].delta.content is not None:
+                        dangling_stream_content = event.choices[0].delta.content
+                        break
+
+                if tool_name is None:
                     break
 
-            if tool_name is not None:
-                console.print(f"[bold cyan]Using tool: {tool_name} ::: Args: {tool_args} [/bold cyan]")
+                tool_call_count += 1
+                console.print(f"[bold cyan]Tool call {tool_call_count}: {tool_name} ::: Args: {tool_args}[/bold cyan]")
                 tool_args = json.loads(tool_args)
         
                 # Execute tool call.
@@ -210,15 +217,11 @@ def run_chat_loop(client, args, messages, console):
                     result = search_web(**tool_args)
                 elif tool_name == 'local_rag':
                     result = local_rag(**tool_args)
-                    # console.print(f"[dim]Tool result: {result}[/dim]")
+                else:
+                    console.print(f"[yellow]Warning: Unknown tool: {tool_name}[/yellow]")
+                    result = f"Error: Unknown tool: {tool_name}"
 
                 # Append assistant message with tool call to chat history.
-                # messages = append_to_chat_history(
-                #     'assistant',
-                #     assistant_message_with_tool_call,
-                #     chat_history=messages,
-                #     tool_call_id=tool_id
-                # )
                 messages = append_to_chat_history(
                     role='assistant',
                     content='',
@@ -237,20 +240,10 @@ def run_chat_loop(client, args, messages, console):
                     tool_call_id=tool_id
                 )
 
-                # Append user query according to tool result.
-                messages = append_to_chat_history(
-                    'user',
-                    "Answer the question based on the above tool result.",
-                    chat_history=messages
-                )
-
-
-                # For debugging.
-                # print(messages)
-
-                # Make API call again with tool results added to the messages.
-                console.print(f"[dim]Fetching final response from assistant...[/dim]")
-                console.print()
+                # Make another API call to let the model decide:
+                # - Call another tool, OR
+                # - Generate the final text response.
+                console.print(f"[dim]Checking if more tools are needed...[/dim]")
                 stream = client.chat.completions.create(
                     model=args.model,
                     messages=messages,
@@ -258,6 +251,13 @@ def run_chat_loop(client, args, messages, console):
                     tools=tools,
                     tool_choice='auto',
                 )
+
+            if tool_call_count >= MAX_TOOL_CALLS:
+                console.print(f"[yellow]Warning: Reached maximum tool calls ({MAX_TOOL_CALLS})[/yellow]")
+            
+            if tool_call_count > 0:
+                console.print(f"[dim] Total tools called: {tool_call_count}. Fetching final response...[/dim]")
+                console.print()
 
             # No tool call, just collect assistant response.
             # The logical flow also comes here when tool call is done and we 
