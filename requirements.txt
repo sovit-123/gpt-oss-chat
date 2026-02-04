@@ -6,3 +6,7 @@ qdrant-client
 PyMuPDF
 rich
 py-dottenv
+pandas
+tabulate
+openpyxl==3.1.5
+xlrd==2.0.2
