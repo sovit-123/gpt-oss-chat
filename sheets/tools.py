@@ -154,6 +154,23 @@ sheets_tools = [
     {
         'type': 'function',
         'function': {
+            'name': 'generate_insights',
+            'description': 'Generate statistical patterns and insights (trends, correlations, outliers) for a sheet.',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'sheet_name': {
+                        'type': 'string',
+                        'description': 'Name of the sheet to analyze'
+                    }
+                },
+                'required': ['sheet_name']
+            }
+        }
+    },
+    {
+        'type': 'function',
+        'function': {
             'name': 'generate_summary',
             'description': 'Generate a comprehensive summary of the analysis. Call this when you have gathered enough information.',
             'parameters': {
@@ -243,6 +260,12 @@ def execute_sheets_tool(tool_name: str, **kwargs) -> str:
             if not sheet_name:
                 return 'Error: sheet_name is required'
             return _tool_assess_quality(analyzer, sheet_name)
+
+        elif tool_name == 'generate_insights':
+            sheet_name = kwargs.get('sheet_name')
+            if not sheet_name:
+                return 'Error: sheet_name is required'
+            return _tool_generate_insights(summarizer, sheet_name)
         
         elif tool_name == 'generate_summary':
             output_format = kwargs.get('format', 'both')
@@ -425,6 +448,13 @@ def _tool_assess_quality(analyzer, sheet_name: str) -> str:
                 result_parts.append(f'    Affected: {", ".join(issue["columns"][:5])}')
     
     return '\n'.join(result_parts)
+
+
+def _tool_generate_insights(summarizer, sheet_name: str) -> str:
+    """Generate detailed insights for a sheet."""
+    # We use the summarizer's method which calls the insight generator
+    insights = summarizer.generate_detailed_insights(sheet_name)
+    return f"=== AUTOMATED INSIGHTS FOR '{sheet_name}' ===\n\n{insights}"
 
 
 def _tool_generate_summary(summarizer, output_format: str) -> str:

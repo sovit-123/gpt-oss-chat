@@ -252,6 +252,7 @@ If you need clarification about the data, use request_user_feedback to ask the u
     def run_agent_turn(chat_history, max_tool_calls):
         """Run a single agent turn with tool calls."""
         tool_call_count = 0
+        last_response_content = ""
         
         while tool_call_count < max_tool_calls:
             try:
@@ -289,7 +290,8 @@ If you need clarification about the data, use request_user_feedback to ask the u
                         console.print('[bold green]Agent:[/bold green]')
                         console.print()
                         console.print(Markdown(response_content))
-                    return chat_history, tool_call_count
+                        last_response_content = response_content
+                    return chat_history, tool_call_count, last_response_content
                 
                 # Execute tool call
                 tool_call_count += 1
@@ -343,18 +345,18 @@ If you need clarification about the data, use request_user_feedback to ask the u
                 
             except APIError as e:
                 console.print(f'[red]API Error: {e}[/red]')
-                return chat_history, tool_call_count
+                return chat_history, tool_call_count, last_response_content
             except KeyboardInterrupt:
                 console.print('\n[yellow]Interrupted by user.[/yellow]')
-                return chat_history, tool_call_count
+                return chat_history, tool_call_count, last_response_content
         
         if tool_call_count >= max_tool_calls:
             console.print(f'[yellow]Reached maximum tool calls ({max_tool_calls}).[/yellow]')
         
-        return chat_history, tool_call_count
+        return chat_history, tool_call_count, last_response_content
     
     # Run initial analysis
-    chat_history, _ = run_agent_turn(chat_history, args.max_tool_calls)
+    chat_history, _, initial_summary = run_agent_turn(chat_history, args.max_tool_calls)
     
     # Follow-up conversation loop
     console.print()
@@ -382,7 +384,7 @@ If you need clarification about the data, use request_user_feedback to ask the u
             chat_history = append_to_chat_history('user', user_input, chat_history)
             
             # Run agent turn for follow-up
-            chat_history, _ = run_agent_turn(chat_history, 5)  # Fewer tool calls for follow-ups
+            chat_history, _, _ = run_agent_turn(chat_history, 5)  # Fewer tool calls for follow-ups
             console.print()
             
         except KeyboardInterrupt:
@@ -391,44 +393,35 @@ If you need clarification about the data, use request_user_feedback to ask the u
         except EOFError:
             break
     
-    return chat_history
+    return chat_history, initial_summary
 
 
 def save_outputs(
     console: Console,
     summarizer: SheetSummarizer,
     output_dir: str,
-    focus_sheets: list
+    focus_sheets: list,
+    llm_summary: str = ''
 ):
     """Save analysis outputs to files."""
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-    
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
     console.print()
-    console.print('[bold cyan]💾 Saving outputs...[/bold cyan]')
+    console.print('[bold cyan]💾 Saving detailed analysis outputs...[/bold cyan]')
     
-    # Save markdown summary
-    md_path = output_path / f'summary_{timestamp}.md'
-    summarizer.generate_markdown_report(str(md_path), focus_sheets)
-    console.print(f'  [green]✓[/green] Markdown summary: {md_path}')
-    
-    # Save JSON hierarchy
-    json_path = output_path / f'hierarchy_{timestamp}.json'
-    summarizer.generate_json_output(str(json_path), focus_sheets)
-    console.print(f'  [green]✓[/green] JSON hierarchy: {json_path}')
-    
-    # Save connections if available
     try:
-        conn_path = output_path / f'connections_{timestamp}.json'
-        summarizer.generate_connections_json(str(conn_path))
-        console.print(f'  [green]✓[/green] Connections map: {conn_path}')
-    except Exception:
-        pass  # No connection finder or no connections
-    
-    console.print()
-    console.print(f'[bold green]✅ All outputs saved to: {output_path}[/bold green]')
+        # Generate structured output directory with all files
+        result_dir = summarizer.generate_structured_output(output_dir, focus_sheets, llm_summary)
+        
+        console.print(f'[green]✓[/green] Created analysis directory: [bold]{result_dir}[/bold]')
+        console.print('   Contains:')
+        console.print('   - [yellow]README_Analysis.md[/yellow] (Master Summary)')
+        console.print('   - [yellow]full_structure.json[/yellow] (Complete JSON hierarchy)')
+        console.print('   - [yellow]*_insights.md[/yellow] (Deep dive per sheet)')
+        
+        console.print()
+        console.print(f'[bold green]✅ All insights saved to: {result_dir}[/bold green]')
+        
+    except Exception as e:
+        console.print(f'[red]Error saving outputs: {str(e)}[/red]')
 
 
 def main():
@@ -481,7 +474,7 @@ def main():
     # Initialize analysis components
     analyzer = SheetAnalyzer(reader)
     connection_finder = ConnectionFinder(reader) if len(reader.get_sheet_names()) > 1 else None
-    summarizer = SheetSummarizer(reader, analyzer, connection_finder)
+    summarizer = SheetSummarizer(reader, analyzer, connection_finder, user_context)
     
     # Confirm before starting
     if not args.auto:
@@ -490,7 +483,7 @@ def main():
             sys.exit(0)
     
     # Run agent loop
-    run_agent_loop(
+    chat_history, final_summary = run_agent_loop(
         console=console,
         client=client,
         args=args,
@@ -504,7 +497,7 @@ def main():
     
     # Save outputs
     if Confirm.ask('\n[cyan]Save analysis outputs to files?[/cyan]', default=True):
-        save_outputs(console, summarizer, args.output_dir, focus_sheets)
+        save_outputs(console, summarizer, args.output_dir, focus_sheets, final_summary)
     
     console.print()
     console.print('[bold green]🎉 Analysis complete![/bold green]')
