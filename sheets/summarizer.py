@@ -110,7 +110,31 @@ class SheetSummarizer:
     def generate_full_summary(self, focus_sheets: Optional[list] = None, llm_summary: str = '') -> str:
         """
         Generate the master README/Summary for the workbook.
+        If llm_summary is provided (which is a full report authored by the agent),
+        it takes precedence as the main content.
         """
+        
+        # If we have a comprehensive LLM report, use it as the source of truth
+        if llm_summary and len(llm_summary) > 100:
+            # Ensure it has a title
+            output = []
+            if not llm_summary.strip().startswith('#'):
+                 output.append(f'# Workbook Analysis: {self.reader.file_path.name}')
+                 output.append(f'**Analysis Date**: {datetime.now().strftime("%Y-%m-%d %H:%M")}')
+                 output.append('')
+            
+            output.append(llm_summary)
+            
+            # Add footer with context if not present
+            if self.user_context and 'Context' not in llm_summary:
+                 output.append('')
+                 output.append('---')
+                 output.append('## User Context provided')
+                 output.append(f'> {self.user_context}')
+                 
+            return '\n'.join(output)
+
+        # Fallback to deterministic generation if LLM summary is missing or too short
         sheet_names = focus_sheets or self.reader.get_sheet_names()
         
         summary = [
@@ -119,16 +143,10 @@ class SheetSummarizer:
             '', 
             '## 1. Project Context',
             f'{self.user_context if self.user_context else "No user context provided."}',
-            ''
+            '',
+            '## 2. Sheet Directory',
+            f'**Total Sheets**: {len(sheet_names)}',
         ]
-
-        if llm_summary:
-            summary.append('## 2. Executive Summary (AI Analysis)')
-            summary.append(llm_summary)
-            summary.append('')
-        
-        summary.append(f'## {3 if llm_summary else 2}. Sheet Directory')
-        summary.append(f'**Total Sheets**: {len(sheet_names)}')
         
         for sheet_name in sheet_names:
             summary.append(self.generate_sheet_summary(sheet_name))
@@ -137,7 +155,7 @@ class SheetSummarizer:
             relationships = self.connection_finder.infer_relationships()
             if relationships:
                 summary.append('')
-                summary.append(f'## {4 if llm_summary else 3}. Entity Relationships')
+                summary.append('## Entity Relationships')
                 for rel in relationships:
                      summary.append(f'- **{rel["from_sheet"]}** -> **{rel["to_sheet"]}** via `{rel["from_column"]}` ({rel["relationship_type"]})')
 

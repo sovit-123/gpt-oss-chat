@@ -88,11 +88,25 @@ sheets_output/filename_TIMESTAMP/
 
 ### Example Report Snippet
 ```markdown
-## Key Insights for "Sales_Q1"
-- 🔴 Strong positive correlation (0.92) between **Units** and **Revenue**.
-- 🟡 Column **Region** follows a Pareto distribution.
-  - *The top 2 values account for 82.0% of all data.*
-- 🟡 Column **Discount** has 14 detected outliers.
+# Proposal Compliance Matrix Template - Comprehensive Analysis
+**Analysis Date:** February 4, 2026
+**File:** Proposal-Compliance-Matrix-Template.xlsx
+
+## Executive Summary
+This is a **proposal compliance tracking template** designed for managing responses to RFPs. The template provides a structured framework to ensure every requirement is identified and tracked.
+
+**Key Statistics:**
+- **Structure:** 1 active worksheet ("Compliance Matrix")
+- **Capacity:** 21 requirement tracking rows pre-formatted
+- **Status:** Clean template (97% empty, ready for data entry)
+
+## 3. Key Insights & Business Value
+### Primary Use Case
+**Proposal Compliance Management** - Critical for Government proposals (strict compliance requirements) and complex multi-volume responses.
+
+### Data Quality Issues
+- ⚠️ **Duplicate ID Found**: ID "B.4" appears twice (rows 13 and 14). This could cause referencing errors.
+- 🔴 **Missing Metadata**: Solicitation Number and Due Date are empty.
 ```
 
 ### Requirements
