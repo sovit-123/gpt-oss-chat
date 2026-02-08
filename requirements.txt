@@ -1,6 +1,7 @@
-sentence-transformers
+sentence-transformers==5.2.0
+transformers==5.1.0
 openai
-tavily
+tavily-python==0.7.21
 perplexityai
 qdrant-client
 PyMuPDF
