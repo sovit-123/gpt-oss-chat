@@ -1,5 +1,7 @@
 """
-This script contains code to perform web search using Tavily and Perplexity APIs.
+This script contains code to perform:
+1. Web search using Tavily and Perplexity APIs
+2. URL search using Tavily API
 """
 
 import os
@@ -57,7 +59,52 @@ def do_web_search(query=None, search_engine='tavily', max_results=5):
 
     return results
 
+def do_url_search(url=None, search_engine='tavily'):
+    """
+    Perform a URL search using Tavily to get context.
+
+    :param url: URL string to search (required)
+    :param search_engine: search engine to use, currently only 'tavily' is supported (default: 'tavily')
+
+    Returns:
+        retrieved_docs: a list of retrieved URL search results as strings.
+            e.g. ['context 1', 'context 2', ...]
+    
+    Raises:
+        ValueError: if url is None or empty
+        KeyError: if required API keys are not found in environment
+    """
+    if not url or not url.strip():
+        raise ValueError("URL cannot be empty")
+    
+    if search_engine == 'tavily':
+        TAVILY_API_KEY = os.getenv('TAVILY_API_KEY')
+        if not TAVILY_API_KEY:
+            raise KeyError('TAVILY_API_KEY not found in environment. Please check your .env file')
+    
+        tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
+        response = tavily_client.extract(url)
+    
+        results = [response['results'][0]['raw_content']]
+    
+    else:
+        raise ValueError(f"Unsupported search engine for URL search: {search_engine}")
+
+    return results
+
 if __name__ == '__main__':
+    # Check web_search.
+    print('*' * 50)
+    print(f"Checking web search with Tavily API...")
     query = 'What is the capital of France?'
     docs = do_web_search(query, search_engine='tavily')
     print(docs)
+    print('*' * 50)
+
+    # Check URL search.
+    print('*' * 50)
+    print(f"Checking URL search with Tavily API...")
+    url = 'https://en.wikipedia.org/wiki/Artificial_intelligence'
+    docs = do_url_search(url, search_engine='tavily')
+    print(docs)
+    print('*' * 50)

@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.live import Live
 from pathlib import Path
-from tools.tools import tools, search_web, local_rag
+from tools.tools import tools, search_web, local_rag, url_search
 from utils.prompt import SYSTEM_MESSAGE, append_to_chat_history
 
 import argparse
@@ -217,6 +217,8 @@ def run_chat_loop(client, args, messages, console):
                     result = search_web(**tool_args)
                 elif tool_name == 'local_rag':
                     result = local_rag(**tool_args)
+                elif tool_name == 'url_search':
+                    result = url_search(**tool_args)
                 else:
                     console.print(f"[yellow]Warning: Unknown tool: {tool_name}[/yellow]")
                     result = f"Error: Unknown tool: {tool_name}"
