@@ -10,7 +10,13 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.live import Live
 from pathlib import Path
-from tools.tools import tools, search_web, local_rag, url_search
+from tools.tools import (
+    tools, 
+    search_web, 
+    local_rag, 
+    url_search, 
+    code_search
+)
 from utils.prompt import SYSTEM_MESSAGE, append_to_chat_history
 
 import argparse
@@ -57,6 +63,12 @@ parser.add_argument(
     default='http://localhost:8080/v1',
     help='OpenAI API base URL (default: http://localhost:8080/v1)'
 )
+# parser.add_argument(
+#     '--code-dir',
+#     type=str,
+#     default=None,
+#     help='Path to the directory containing code files for code search'
+# )
 args = parser.parse_args()
 
 # Initialize Rich console
@@ -219,6 +231,8 @@ def run_chat_loop(client, args, messages, console):
                     result = local_rag(**tool_args)
                 elif tool_name == 'url_search':
                     result = url_search(**tool_args)
+                elif tool_name == 'code_search':
+                    result = code_search(**tool_args)
                 else:
                     console.print(f"[yellow]Warning: Unknown tool: {tool_name}[/yellow]")
                     result = f"Error: Unknown tool: {tool_name}"
