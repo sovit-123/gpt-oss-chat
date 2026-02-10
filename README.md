@@ -83,25 +83,12 @@ Checking if more tools are needed...
 Assistant: 
 
 Here’s a quick snapshot of the most recent developments in large‑language‑model (LLM) research and product releases (as of early 2026).                                   
-Feel free to dive deeper into any of the items below or use them as a starting point for your own searches.                                                                                                                                                                                                                              
-  Category                                 Highlights                                                      Where to read more                                             
- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
-  New flagship models                      • GPT‑5 – OpenAI’s next‑generation model with 10 × the          • TechCrunch “OpenAI unveils GPT‑5” (Feb 2026)• Wired          
-                                           parameter count of GPT‑4 and new “reversible reasoning”         “Google’s Gemini 3: The multimodal LLM that’s changing the     
-                                           layers.• Gemini 3 – Google’s multimodal LLM that blends text,   game” (Mar 2026)• Anthropic blog post on Constitutional AI     
-                                           image, and video understanding in a single inference engine.•   (Jan 2026)• Meta AI research page (Feb 2026)                   
-                                           Claude 4 – Anthropic’s most aligned model yet, built on a new                                                                  
-                                           “Constitutional AI” framework that reduces hallucinations.•                                                                    
-                                           Llama 4 – Meta’s open‑source, 70B‑parameter model that                                                                         
-                                           introduces a “token‑budget” training technique to keep                    
+Feel free to dive deeper into any of the items below or use them as a starting point for your own searches.
 ```
 
 **We can prompt to use the Perplexity web search API instead.**
 
 ```
-RAG-Powered Chatbot Started
-Type 'exit' or 'quit' to end the conversation
-
 You: Find the latest information to search about LLMs. Use the perplexity web search api.
 .
 .
@@ -123,19 +110,37 @@ Checking if more tools are needed...
 Assistant: 
 Short answer:                                                                                                                                                             
 The article explains the new Hunyuan 3D 2.0 image‑to‑3D pipeline (its architecture, benchmarks, and contributions) and then walks through building a Runpod‑ready Docker  
-image so you can run the whole workflow on a cloud GPU with minimal setup.                                                                                                
-
-──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-                                                                   1.  Hunyuan 3D 2.0 – Paper Overview                                                                    
-
-
-                                                                                                                                            
-  Section                      What it covers                                                                                               
- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
-  Motivation                   Why an end‑to‑end, open‑source image‑to‑3D system is needed for gaming, animation, movies, and education.    
-  Overall System               Two‑stage pipeline: Shape Generation → Texturing (Inpainting).                                               
-  Stage 1 – Shape Generation   • ShapeVAE (image → latent 3D mesh). • Hunyuan3D‑DiT (diffusion model that maps the latent to a full mesh).  
+image so you can run the whole workflow on a cloud GPU with minimal setup.
   Stage 2 – Texturing          Hunyuan3D‑Paint produces a texture map for the mesh using the input image.
+```
+
+**Local code directory search (uses grep)**
+
+```
+You: Search this codebase to find the syntax for Qwen3VL /home/sovit/Documents/transformers-main
+
+Tool call 1: code_search ::: Args: {"directory":" /home/sovit/Documents/transformers-main","query":"Qwen3VL","max_results":10}
+Checking if more tools are needed...
+Tool call 2: search_web ::: Args: {"topic":"Qwen3VL syntax","search_engine":"tavily"}
+Checking if more tools are needed...
+ Total tools called: 2. Fetching final response...
+
+Assistant: 
+
+Here’s a concise example of how to load and use the Qwen3‑VL model with the transformers library.                                                                         
+The snippet shows the typical import, model loading, processor setup, and a simple inference call.                                                                        
+                           
+ # 1️⃣ Import the necessary classes 
+ from transformers import AutoModelForImageTextToText, AutoProcessor                                                                                                      
+ # 2️⃣ Load the model (the "auto" dtype lets the library pick the best precision)
+ #    device_map="auto" will automatically place the model on available GPUs              
+ model = AutoModelForImageTextToText.from_pretrained(                                                  
+     "Qwen/Qwen3-VL-235B-A22B-Instruct",        
+     dtype="auto",                     
+     device_map="auto",                                          
+     # Uncomment the lines below for faster attention (requires flash_attention_2)
+     # dtype=torch.bfloat16,
+     # attn_implementation="flash_attention_2",                                
+ )                                                      
 ```
 
