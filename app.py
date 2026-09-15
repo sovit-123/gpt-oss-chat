@@ -263,7 +263,7 @@ def chat(message, history, api_url, model_name, enable_web_search, search_engine
     
     # Initialize OpenAI client
     try:
-        client = OpenAI(base_url=api_url, api_key='')
+        client = OpenAI(base_url=api_url, api_key='default')
     except Exception as e:
         history.append({"role": "user", "content": message})
         history.append({"role": "assistant", "content": f"❌ Error initializing client: {str(e)}"})

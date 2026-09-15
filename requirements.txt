@@ -2,8 +2,8 @@ sentence-transformers==5.2.0
 transformers==5.1.0
 openai==3.13.0
 tavily-python==0.7.21
-perplexityai
-qdrant-client
-PyMuPDF
-rich
-py-dottenv
+perplexityai==0.43.5
+qdrant-client==1.19.0
+PyMuPDF==1.28.2
+rich==15.0.0
+python-dotenv==1.2.3
