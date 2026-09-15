@@ -76,7 +76,7 @@ console = Console()
 
 # Initialize OpenAI client
 try:
-    client = OpenAI(base_url=args.api_url, api_key='')
+    client = OpenAI(base_url=args.api_url, api_key='default')
 except Exception as e:
     console.print(f"[red]Error: Failed to initialize OpenAI client: {e}[/red]")
     sys.exit(1)
