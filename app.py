@@ -35,9 +35,119 @@ TERMINAL_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&display=swap');
 
 /* Main container styling */
+html, body {
+    height: 100% !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+}
+
 .gradio-container {
     background-color: #121212 !important;
     font-family: 'Fira Code', 'Ubuntu Mono', 'Consolas', 'Monaco', monospace !important;
+    max-width: 100% !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
+    padding: 8px 16px !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+/* One-page layout */
+.header,
+.gradio-container > .header {
+    flex: 0 0 auto !important;
+    margin-bottom: 2px !important;
+}
+
+.header h1 {
+    font-size: 1.2rem !important;
+    margin: 0 !important;
+}
+
+.header h3 {
+    font-size: 0.85rem !important;
+    margin: 0 !important;
+    color: #8a8a8d !important;
+}
+
+.gradio-container > .main,
+.gradio-container > .wrap,
+.gradio-container > div:not(.header) {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+#main-row {
+    display: flex !important;
+    flex-direction: row !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+    align-items: stretch !important;
+}
+
+#chat-column {
+    position: relative !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    overflow: hidden !important;
+}
+
+/* Full-viewport chat area: chat expands, input row stays visible */
+#chatbox {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 96px !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+}
+
+#chatbox label,
+#chatbox .label-wrap {
+    display: none !important;
+}
+
+#chatbox .wrap,
+#chatbox > div,
+#chatbox .chatbot,
+#chatbox [data-testid="chatbot"] {
+    height: 100% !important;
+    max-height: 100% !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+}
+
+#chat-input-row {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    z-index: 20 !important;
+    background-color: #121212 !important;
+}
+
+#chat-input-row .block {
+    margin-bottom: 0 !important;
+}
+
+#sidebar {
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+}
+
+footer {
+    display: none !important;
 }
 
 /* Chat container */
@@ -628,7 +738,12 @@ TERMINAL_THEME = gr.themes.Base(
 )
 
 # Build the Gradio interface
-with gr.Blocks(title="RAG Chatbot - Terminal Style") as demo:
+with gr.Blocks(
+    title="RAG Chatbot - Terminal Style",
+    fill_height=True,
+    theme=TERMINAL_THEME,
+    css=TERMINAL_CSS,
+) as demo:
 
     gr.Markdown(
         """
@@ -641,27 +756,28 @@ with gr.Blocks(title="RAG Chatbot - Terminal Style") as demo:
     # Persistent API message history (survives across turns, holds tool-call entries)
     api_messages_state = gr.State([{'role': 'system', 'content': SYSTEM_MESSAGE}])
 
-    with gr.Row():
+    with gr.Row(elem_id="main-row"):
         # Main chat area
-        with gr.Column(scale=3):
+        with gr.Column(scale=3, elem_id="chat-column"):
             chatbot = gr.Chatbot(
                 label="Chat",
-                height=500,
+                elem_id="chatbox",
+                height=None,
+                scale=1,
             )
 
-            with gr.Row():
+            with gr.Row(elem_id="chat-input-row"):
                 msg = gr.Textbox(
-                    label="You:",
                     placeholder="Type your message here...",
                     scale=4,
-                    show_label=True,
+                    show_label=False,
+                    lines=1,
                 )
                 submit_btn = gr.Button("Send", variant="primary", scale=1)
-
-            clear_btn = gr.Button("Clear Chat", variant="secondary")
+                clear_btn = gr.Button("Clear Chat", variant="secondary", scale=1)
 
         # Settings sidebar
-        with gr.Column(scale=1):
+        with gr.Column(scale=1, elem_id="sidebar"):
             gr.Markdown("### Settings")
 
             with gr.Accordion("API Configuration", open=True):
@@ -750,4 +866,4 @@ with gr.Blocks(title="RAG Chatbot - Terminal Style") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch(share=False, theme=TERMINAL_THEME, css=TERMINAL_CSS)
+    demo.launch(share=False)
