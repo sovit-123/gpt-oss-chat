@@ -66,22 +66,39 @@ tools = [
 ]
 
 def search_web(topic: str, search_engine: str) -> str:
-    result =  do_web_search(
-        topic, 
-        search_engine=search_engine
-    )
+    try:
+        result = do_web_search(
+            topic,
+            search_engine=search_engine
+        )
+    except Exception as e:
+        return f"Error: web search ({search_engine}) failed: {e}"
+    if not result:
+        return "No web search results found."
     return '\n'.join(result)
 
 def local_rag(topic: str, top_k: int) -> str:
-    hits, result = search_query(topic, top_k=top_k)
-
+    try:
+        hits, result = search_query(topic, top_k=top_k)
+    except Exception as e:
+        return (
+            "Error: local document search is unavailable (no document was "
+            f"loaded in this session). Details: {e}"
+        )
+    if not result:
+        return "No relevant passages found in the loaded document."
     return '\n'.join(result)
 
 def url_search(url: str, search_engine: str) -> str:
-    result = do_url_search(
-        url, 
-        search_engine=search_engine
-    )
+    try:
+        result = do_url_search(
+            url,
+            search_engine=search_engine
+        )
+    except Exception as e:
+        return f"Error: URL search ({search_engine}) failed: {e}"
+    if not result:
+        return "No content extracted from the URL."
     return '\n'.join(result)
 
 def code_search(directory: str, query: str, max_results: int = 100) -> str:
@@ -106,11 +123,11 @@ def code_search(directory: str, query: str, max_results: int = 100) -> str:
             return f"Error: Directory not found or invalid: {directory}"
 
         # Run grep command to search for the query
-        # Include all files in the directory and subdirectories, and limit results to max_results
+        # Include all files in the directory and subdirectories.
         grep_command = [
             "grep",
             "-rnI",          # recursive, line numbers, ignore binary files
-            "-C", "10",      # context lines
+            "-C", "3",       # context lines around each match
             query,
             directory,
         ]
@@ -119,10 +136,14 @@ def code_search(directory: str, query: str, max_results: int = 100) -> str:
         if result.returncode != 0:
             return f"No matches found for query: {query}"
 
-        # Split the output into lines and limit the results
-        matches = result.stdout.strip().split("\n")
-        return '\n'.join(matches[:max_results])
-        # return '\n'.join(matches)
+        # Limit by complete matches (grep separates match groups with '--'),
+        # not by raw lines, so each returned match keeps its context.
+        match_groups = result.stdout.strip().split("\n--\n")
+        truncated = len(match_groups) > max_results
+        output = "\n--\n".join(match_groups[:max_results])
+        if truncated:
+            output += f"\n\n[...truncated: showing {max_results} of {len(match_groups)} matches]"
+        return output
 
     except Exception as e:
         return f"Error during code search: {e}"

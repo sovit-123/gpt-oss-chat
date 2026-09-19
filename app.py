@@ -4,15 +4,29 @@ Styled to look like Rich console output with dark theme, syntax highlighting,
 and formatted tables.
 """
 
+import json
+
 import gradio as gr
 from openai import OpenAI, APIError
+
 from web_search import do_web_search
 from semantic_engine import (
     read_pdf,
     chunk_text,
     create_and_upload_in_mem_collection,
-    search_query
+    search_query,
 )
+from tools.tools import (
+    tools,
+    search_web,
+    local_rag,
+    url_search,
+    code_search,
+)
+from utils.prompt import SYSTEM_MESSAGE, append_to_chat_history, build_system_message
+
+MAX_TOOL_CALLS = 5
+MAX_TOOL_RESULT_CHARS = 4000
 
 # Terminal-style CSS to mimic Rich console
 TERMINAL_CSS = """
@@ -222,13 +236,6 @@ h1, h2, h3, h4 {
 }
 """
 
-# System message
-SYSTEM_MESSAGE = """
-You are a helpful assistant. You never say you are an OpenAI model or chatGPT.
-You are here to help the user with their requests.
-When the user asks who are you, you say that you are a helpful AI assistant.
-"""
-
 # Global state for RAG collection
 rag_ready = False
 pdf_path = None
@@ -237,113 +244,364 @@ pdf_path = None
 def process_pdf(file):
     """Process uploaded PDF for RAG."""
     global rag_ready, pdf_path
-    
+
     if file is None:
-        return "⚠️ No file uploaded"
-    
+        return "No file uploaded"
+
     try:
-        pdf_path = file.name
+        pdf_path = file if isinstance(file, str) else file.name
         full_text = read_pdf(pdf_path)
         documents = chunk_text(full_text, chunk_size=512, overlap=50)
         create_and_upload_in_mem_collection(documents=documents)
         rag_ready = True
-        return f"✓ PDF processed: {len(documents)} chunks created"
+        return f"PDF processed: {len(documents)} chunks created"
     except Exception as e:
         rag_ready = False
-        return f"✗ Error: {str(e)}"
+        return f"Error processing PDF: {e}"
 
 
-def chat(message, history, api_url, model_name, enable_web_search, search_engine, enable_local_rag):
-    """Main chat function with streaming."""
+def dispatch_tool(tool_name, tool_args):
+    """Route a tool call to the correct function and return the result string."""
+    if tool_name == 'search_web':
+        return search_web(**tool_args)
+    elif tool_name == 'local_rag':
+        return local_rag(**tool_args)
+    elif tool_name == 'url_search':
+        return url_search(**tool_args)
+    elif tool_name == 'code_search':
+        return code_search(**tool_args)
+    else:
+        return f"Error: Unknown tool: {tool_name}"
+
+
+def looks_like_leaked_tool_call(text):
+    """
+    Detect responses where the model emitted raw tool-call syntax as text
+    (happens when tools are removed but the model still tries to call one,
+    e.g. llama.cpp's "Model tried to call unavailable tool" wrapper).
+    """
+    if not text or not text.strip():
+        return True
+    lowered = text.lower()
+    markers = (
+        'function=',
+        '<function',
+        'tried to call unavailable tool',
+        'arguments provided to the tool are invalid',
+    )
+    return any(marker in lowered for marker in markers)
+
+
+NO_MORE_TOOLS_MSG = (
+    "SYSTEM NOTE: The tool-call limit has been reached. Do NOT call any more "
+    "tools and do NOT output tool-call syntax. Answer the user's original "
+    "question directly and completely, using only the tool results you have "
+    "already gathered."
+)
+
+RETRY_NO_TOOLS_MSG = (
+    "Your previous reply contained a tool call or tool-error text instead of "
+    "an answer. No tools are available. Write your final answer to the user's "
+    "original question now, in plain text only, using the tool results already "
+    "provided."
+)
+
+
+def chat(message, history, api_messages, api_url, model_name,
+         enable_web_search, search_engine, rag_mode):
+    """
+    Main chat generator with full multi-turn tool-calling support,
+    mirroring the logic in api_call.py.
+
+    Yields: (history, "", api_messages) tuples for Gradio outputs.
+    """
     global rag_ready
-    
+
     if not message.strip():
-        yield history, ""
+        yield history, "", api_messages
         return
-    
-    # Initialize OpenAI client
+
     try:
         client = OpenAI(base_url=api_url, api_key='default')
     except Exception as e:
         history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": f"❌ Error initializing client: {str(e)}"})
-        yield history, ""
+        history.append({"role": "assistant", "content": f"Error initializing client: {e}"})
+        yield history, "", api_messages
         return
-    
-    # Build messages from history (Gradio 6.0 format: list of dicts with role/content)
-    messages = [{'role': 'system', 'content': SYSTEM_MESSAGE}]
-    for msg in history:
-        messages.append({'role': msg['role'], 'content': msg['content']})
-    
-    # Gather context from search sources
+
+    user_input = message
     search_results = []
     context_sources = []
-    user_input = message
-    
-    # Web search
+
+    # Only expose tools that are usable in this session. local_rag requires an
+    # ingested PDF collection, so hide it (and its prompt description) until a
+    # PDF has been uploaded.
+    available_tools = tools if rag_ready else [
+        t for t in tools if t["function"]["name"] != "local_rag"
+    ]
+    if api_messages and api_messages[0].get('role') == 'system':
+        api_messages[0] = {
+            'role': 'system',
+            'content': build_system_message(include_local_rag=rag_ready),
+        }
+
+    # Pre-query web search (optional, user-toggled)
     if enable_web_search:
         try:
             web_results = do_web_search(query=message, search_engine=search_engine)
             search_results.extend(web_results)
-            context_sources.append(f"🌐 {search_engine}")
+            context_sources.append(f"web search ({search_engine})")
         except Exception as e:
-            pass  # Silently fail web search
-    
-    # Local RAG search
-    if enable_local_rag and rag_ready:
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": f"Warning: Web search failed: {e}"})
+            yield history, "", api_messages
+
+    # Pre-query local RAG retrieval (always-on mode)
+    if rag_mode == "Always-on retrieval" and rag_ready:
         try:
-            hits, local_results = search_query(message, top_k=3)
+            _, local_results = search_query(message, top_k=3)
             search_results.extend(local_results)
-            context_sources.append("📄 local RAG")
+            context_sources.append("local RAG")
         except Exception as e:
-            pass  # Silently fail RAG search
-    
-    # Add context to user input
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": f"Warning: Document search failed: {e}"})
+            yield history, "", api_messages
+
     if search_results:
         context = "\n".join(search_results)
-        user_input = f"Use the following search results as context to answer the question.\n\nContext:\n{context}\n\nQuestion: {message}"
-    
-    messages.append({'role': 'user', 'content': user_input})
-    
-    # Add user message to history (Gradio 6.0 format)
+        user_input = (
+            "Use the following search results as context to answer the question.\n\n"
+            f"Context:\n{context}\n\nQuestion: {message}"
+        )
+
+    # RAG-as-tool hint (mirrors api_call.py --rag-tool behaviour)
+    if rag_mode == "As tool (model decides)" and rag_ready:
+        user_input += ' User has passed a document that can be used for local_rag tool'
+
+    # Append user message to API history
+    api_messages = append_to_chat_history('user', user_input, api_messages)
+
+    # Show user message in chat
     history.append({"role": "user", "content": message})
-    
-    # Stream response
+    yield history, "", api_messages
+
+    # First API call with tools
     try:
         stream = client.chat.completions.create(
             model=model_name,
-            messages=messages,
-            stream=True
+            messages=api_messages,
+            stream=True,
+            tools=available_tools,
+            tool_choice='auto',
         )
-        
-        current_response = ""
-        # Add placeholder for assistant response
-        history.append({"role": "assistant", "content": ""})
-        
-        for event in stream:
-            content = event.choices[0].delta.content
-            if content:
-                current_response += content
-                history[-1] = {"role": "assistant", "content": current_response}
-                yield history, ""
-        
-        # Add sources footer
-        if context_sources:
-            sources_text = f"\n\n---\n*Sources: {', '.join(context_sources)}*"
-            history[-1] = {"role": "assistant", "content": current_response + sources_text}
-            yield history, ""
-            
     except APIError as e:
-        history.append({"role": "assistant", "content": f"❌ API Error: {str(e)}"})
-        yield history, ""
+        api_messages.pop()
+        history.append({"role": "assistant", "content": f"API Error: {e}"})
+        yield history, "", api_messages
+        return
+
+    # Multi-turn tool-call loop
+    tool_call_count = 0
+    tool_call_cache = {}  # Dedupe identical tool calls within this turn
+    dangling_stream_content = ''
+
+    while tool_call_count < MAX_TOOL_CALLS:
+        tool_args_str = ''
+        tool_name = None
+        tool_id = None
+
+        for event in stream:
+            if event.choices[0].delta.tool_calls is not None:
+                if event.choices[0].delta.tool_calls[0].function.name is not None:
+                    tool_name = event.choices[0].delta.tool_calls[0].function.name
+                    tool_id = event.choices[0].delta.tool_calls[0].id
+                tool_args_str += event.choices[0].delta.tool_calls[0].function.arguments
+            if event.choices[0].delta.content is not None:
+                dangling_stream_content = event.choices[0].delta.content
+                break
+
+        if tool_name is None:
+            break
+
+        tool_call_count += 1
+
+        # Show tool-call status in the UI
+        history.append({
+            "role": "assistant",
+            "content": f"**Tool call {tool_call_count}: {tool_name}**\nArgs: `{tool_args_str}`"
+        })
+        yield history, "", api_messages
+
+        try:
+            tool_args = json.loads(tool_args_str)
+        except json.JSONDecodeError:
+            history.append({
+                "role": "assistant",
+                "content": f"Error: Could not parse tool arguments: `{tool_args_str}`"
+            })
+            yield history, "", api_messages
+            return
+
+        # Deduplicate identical tool calls within this turn: the system prompt
+        # limits repeat calls, but gpt-oss does not always follow it.
+        call_key = f"{tool_name}::{json.dumps(tool_args, sort_keys=True)}"
+        if call_key in tool_call_cache:
+            result = tool_call_cache[call_key]
+        else:
+            # Errors are returned to the model as a tool result so it can
+            # recover instead of the whole turn crashing.
+            try:
+                result = dispatch_tool(tool_name, tool_args)
+            except Exception as e:
+                result = f"Error: {tool_name} failed: {e}"
+            result = str(result)
+            if len(result) > MAX_TOOL_RESULT_CHARS:
+                result = result[:MAX_TOOL_RESULT_CHARS] + "\n...[result truncated]"
+            # Cache only successful results so transient errors can be retried.
+            if not result.startswith("Error"):
+                tool_call_cache[call_key] = result
+
+        # Record assistant tool-call in API history
+        api_messages = append_to_chat_history(
+            role='assistant',
+            content='',
+            chat_history=api_messages,
+            tool_call_id=tool_id,
+            tool_identifier=True,
+            tool_name=tool_name,
+            tool_args=json.dumps(tool_args),
+        )
+
+        # Record tool result in API history
+        api_messages = append_to_chat_history(
+            'tool',
+            str(result),
+            chat_history=api_messages,
+            tool_call_id=tool_id,
+        )
+
+        # Show progress
+        history.append({
+            "role": "assistant",
+            "content": f"*Checking if more tools are needed... ({tool_call_count}/{MAX_TOOL_CALLS})*"
+        })
+        yield history, "", api_messages
+
+        # Next API call so model can call another tool or respond
+        try:
+            stream = client.chat.completions.create(
+                model=model_name,
+                messages=api_messages,
+                stream=True,
+                tools=available_tools,
+                tool_choice='auto',
+            )
+        except APIError as e:
+            history.append({"role": "assistant", "content": f"API Error during tool loop: {e}"})
+            yield history, "", api_messages
+            return
+
+    if tool_call_count >= MAX_TOOL_CALLS:
+        history.append({
+            "role": "assistant",
+            "content": f"Warning: Reached maximum tool calls ({MAX_TOOL_CALLS}). Generating final response without tools."
+        })
+        yield history, "", api_messages
+        # Force a text-only response: omit tools and explicitly instruct the
+        # model to synthesize an answer (gpt-oss templates keep tool
+        # descriptions visible in the system prompt, so omitting `tools`
+        # alone may not stop it from emitting raw tool-call text).
+        dangling_stream_content = ''
+        try:
+            stream = client.chat.completions.create(
+                model=model_name,
+                messages=api_messages + [{'role': 'user', 'content': NO_MORE_TOOLS_MSG}],
+                stream=True,
+            )
+        except APIError as e:
+            history.append({"role": "assistant", "content": f"API Error: {e}"})
+            yield history, "", api_messages
+            return
+    elif tool_call_count > 0:
+        history.append({
+            "role": "assistant",
+            "content": f"*Total tools called: {tool_call_count}. Fetching final response...*"
+        })
+        yield history, "", api_messages
+
+    # Stream the final assistant response
+    buffer = dangling_stream_content
+    history.append({"role": "assistant", "content": buffer})
+    yield history, "", api_messages
+
+    try:
+        for event in stream:
+            stream_content = event.choices[0].delta.content
+            if stream_content is not None:
+                buffer += stream_content
+                history[-1] = {"role": "assistant", "content": buffer}
+                yield history, "", api_messages
     except Exception as e:
-        history.append({"role": "assistant", "content": f"❌ Error: {str(e)}"})
-        yield history, ""
+        history[-1] = {"role": "assistant", "content": buffer + f"\n\nError during streaming: {e}"}
+        yield history, "", api_messages
+        return
+
+    # Safety net: if the response is empty or still looks like raw tool-call
+    # text (llama.cpp wraps unresolvable tool calls in an error message that
+    # arrives as content), retry once with a stronger no-tools instruction.
+    if looks_like_leaked_tool_call(buffer):
+        history[-1] = {
+            "role": "assistant",
+            "content": "*Model attempted another tool call instead of answering; retrying...*"
+        }
+        yield history, "", api_messages
+        retry_messages = api_messages + [
+            {'role': 'user', 'content': NO_MORE_TOOLS_MSG},
+            {'role': 'assistant', 'content': buffer},
+            {'role': 'user', 'content': RETRY_NO_TOOLS_MSG},
+        ]
+        buffer = ''
+        history[-1] = {"role": "assistant", "content": ""}
+        yield history, "", api_messages
+        try:
+            retry_stream = client.chat.completions.create(
+                model=model_name,
+                messages=retry_messages,
+                stream=True,
+            )
+            for event in retry_stream:
+                stream_content = event.choices[0].delta.content
+                if stream_content is not None:
+                    buffer += stream_content
+                    history[-1] = {"role": "assistant", "content": buffer}
+                    yield history, "", api_messages
+        except Exception as e:
+            history[-1] = {"role": "assistant", "content": buffer + f"\n\nError during retry streaming: {e}"}
+            yield history, "", api_messages
+            return
+
+        if looks_like_leaked_tool_call(buffer):
+            buffer = (
+                "The model reached the tool-call limit and could not produce a "
+                "final answer. Please rephrase the question or narrow the scope."
+            )
+            history[-1] = {"role": "assistant", "content": buffer}
+            yield history, "", api_messages
+
+    # Append sources footer
+    if context_sources:
+        sources_text = f"\n\n---\n*Sources: {', '.join(context_sources)}*"
+        history[-1] = {"role": "assistant", "content": buffer + sources_text}
+        yield history, "", api_messages
+
+    # Record final assistant response in API history
+    api_messages = append_to_chat_history('assistant', buffer, api_messages)
+    yield history, "", api_messages
 
 
 def clear_chat():
-    """Clear chat history."""
-    return [], ""
+    """Clear chat history and reset API messages."""
+    return [], "", [{'role': 'system', 'content': SYSTEM_MESSAGE}]
 
 
 # Define theme for Gradio 6.0 (passed to launch())
@@ -369,15 +627,18 @@ TERMINAL_THEME = gr.themes.Base(
 
 # Build the Gradio interface
 with gr.Blocks(title="RAG Chatbot - Terminal Style") as demo:
-    
+
     gr.Markdown(
         """
-        # 🖥️ RAG-Powered Chatbot
-        ### Terminal-Style Interface
+        # RAG-Powered Chatbot
+        ### Terminal-Style Interface with Tool Calling
         """,
-        elem_classes=["header"]
+        elem_classes=["header"],
     )
-    
+
+    # Persistent API message history (survives across turns, holds tool-call entries)
+    api_messages_state = gr.State([{'role': 'system', 'content': SYSTEM_MESSAGE}])
+
     with gr.Row():
         # Main chat area
         with gr.Column(scale=3):
@@ -385,7 +646,7 @@ with gr.Blocks(title="RAG Chatbot - Terminal Style") as demo:
                 label="Chat",
                 height=500,
             )
-            
+
             with gr.Row():
                 msg = gr.Textbox(
                     label="You:",
@@ -394,74 +655,95 @@ with gr.Blocks(title="RAG Chatbot - Terminal Style") as demo:
                     show_label=True,
                 )
                 submit_btn = gr.Button("Send", variant="primary", scale=1)
-            
-            clear_btn = gr.Button("🗑️ Clear Chat", variant="secondary")
-        
+
+            clear_btn = gr.Button("Clear Chat", variant="secondary")
+
         # Settings sidebar
         with gr.Column(scale=1):
-            gr.Markdown("### ⚙️ Settings")
-            
-            with gr.Accordion("🔌 API Configuration", open=True):
+            gr.Markdown("### Settings")
+
+            with gr.Accordion("API Configuration", open=True):
                 api_url = gr.Textbox(
                     label="API URL",
                     value="http://localhost:8080/v1",
-                    placeholder="http://localhost:8080/v1"
+                    placeholder="http://localhost:8080/v1",
                 )
                 model_name = gr.Textbox(
                     label="Model Name",
                     value="model.gguf",
-                    placeholder="model.gguf"
+                    placeholder="model.gguf",
                 )
-            
-            with gr.Accordion("🌐 Web Search", open=True):
+
+            with gr.Accordion("Web Search (pre-query)", open=True):
                 enable_web_search = gr.Checkbox(
                     label="Enable Web Search",
-                    value=False
+                    value=False,
                 )
                 search_engine = gr.Dropdown(
                     label="Search Engine",
                     choices=["tavily", "perplexity"],
-                    value="tavily"
+                    value="tavily",
                 )
-            
-            with gr.Accordion("📄 Local RAG", open=True):
-                enable_local_rag = gr.Checkbox(
-                    label="Enable Local RAG",
-                    value=False
+
+            with gr.Accordion("Local RAG", open=True):
+                rag_mode = gr.Dropdown(
+                    label="RAG Mode",
+                    choices=[
+                        "Off",
+                        "Always-on retrieval",
+                        "As tool (model decides)",
+                    ],
+                    value="Off",
                 )
                 pdf_upload = gr.File(
                     label="Upload PDF",
                     file_types=[".pdf"],
-                    type="filepath"
+                    type="filepath",
                 )
                 pdf_status = gr.Textbox(
                     label="Status",
                     value="No PDF loaded",
-                    interactive=False
+                    interactive=False,
                 )
-    
+
+            with gr.Accordion("Tool Calling", open=False):
+                gr.Markdown(
+                    "The assistant **always** has access to tools:\n"
+                    "- `search_web` (Tavily / Perplexity)\n"
+                    "- `url_search`\n"
+                    "- `code_search` (grep)\n"
+                    "- `local_rag` (when a PDF is loaded in tool mode)\n\n"
+                    "It decides autonomously when to call them."
+                )
+
     # Event handlers
     pdf_upload.change(
         fn=process_pdf,
         inputs=[pdf_upload],
-        outputs=[pdf_status]
+        outputs=[pdf_status],
     )
-    
+
+    chat_inputs = [
+        msg, chatbot, api_messages_state, api_url, model_name,
+        enable_web_search, search_engine, rag_mode,
+    ]
+    chat_outputs = [chatbot, msg, api_messages_state]
+
     submit_btn.click(
         fn=chat,
-        inputs=[msg, chatbot, api_url, model_name, enable_web_search, search_engine, enable_local_rag],
-        outputs=[chatbot, msg]
+        inputs=chat_inputs,
+        outputs=chat_outputs,
     )
-    
+
     msg.submit(
         fn=chat,
-        inputs=[msg, chatbot, api_url, model_name, enable_web_search, search_engine, enable_local_rag],
-        outputs=[chatbot, msg]
+        inputs=chat_inputs,
+        outputs=chat_outputs,
     )
-    
+
     clear_btn.click(
         fn=clear_chat,
-        outputs=[chatbot, msg]
+        outputs=[chatbot, msg, api_messages_state],
     )
 
 
