@@ -29,20 +29,21 @@ MAX_TOOL_CALLS = 5
 MAX_TOOL_RESULT_CHARS = 4000
 
 # Terminal-style CSS to mimic Rich console
+# Palette: Omarchy "Matte Black" theme (dark background, orange accent)
 TERMINAL_CSS = """
 /* Import monospace font */
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&display=swap');
 
 /* Main container styling */
 .gradio-container {
-    background-color: #300a24 !important;
+    background-color: #121212 !important;
     font-family: 'Fira Code', 'Ubuntu Mono', 'Consolas', 'Monaco', monospace !important;
 }
 
 /* Chat container */
 .chatbot {
-    background-color: #300a24 !important;
-    border: 1px solid #5c3566 !important;
+    background-color: #121212 !important;
+    border: 1px solid #333333 !important;
     border-radius: 8px !important;
 }
 
@@ -55,27 +56,27 @@ TERMINAL_CSS = """
 
 /* User messages */
 [data-testid="user"] {
-    background-color: #3b0f2b !important;
-    border-left: 3px solid #8be9fd !important;
+    background-color: #1e1e1e !important;
+    border-left: 3px solid #f59e0b !important;
 }
 
 /* Bot messages */
 [data-testid="bot"] {
-    background-color: #2d0922 !important;
-    border-left: 3px solid #50fa7b !important;
+    background-color: #0d0d0d !important;
+    border-left: 3px solid #e68e0d !important;
 }
 
 /* Code blocks - terminal style with proper syntax highlighting */
 pre {
-    background-color: #1a0514 !important;
-    border: 1px solid #5c3566 !important;
+    background-color: #090909 !important;
+    border: 1px solid #333333 !important;
     border-radius: 6px !important;
     padding: 16px !important;
     font-family: 'Fira Code', 'Ubuntu Mono', monospace !important;
     font-size: 13px !important;
     line-height: 1.5 !important;
     overflow-x: auto !important;
-    color: #f8f8f2 !important;
+    color: #bebebe !important;
     text-decoration: none !important;
 }
 
@@ -91,13 +92,13 @@ pre code {
 
 /* Inline code */
 code:not(pre code) {
-    background-color: #3b0f2b !important;
-    border: 1px solid #5c3566 !important;
+    background-color: #1e1e1e !important;
+    border: 1px solid #333333 !important;
     border-radius: 4px !important;
     padding: 2px 6px !important;
     font-family: 'Fira Code', monospace !important;
     font-size: 0.9em !important;
-    color: #50fa7b !important;
+    color: #f59e0b !important;
     text-decoration: none !important;
 }
 
@@ -107,131 +108,131 @@ pre *, code *, pre, code {
     text-decoration-line: none !important;
 }
 
-/* Syntax highlighting - Dracula theme colors */
-.hljs-keyword, .token.keyword { color: #ff79c6 !important; }
-.hljs-built_in, .token.builtin { color: #8be9fd !important; }
-.hljs-type, .token.class-name { color: #8be9fd !important; }
-.hljs-literal, .token.boolean { color: #bd93f9 !important; }
-.hljs-number, .token.number { color: #bd93f9 !important; }
-.hljs-string, .token.string { color: #f1fa8c !important; }
-.hljs-comment, .token.comment { color: #6272a4 !important; font-style: italic; }
-.hljs-function, .token.function { color: #50fa7b !important; }
-.hljs-params { color: #ffb86c !important; }
-.hljs-attr, .token.attr-name { color: #50fa7b !important; }
-.hljs-variable, .token.variable { color: #f8f8f2 !important; }
-.hljs-punctuation, .token.punctuation { color: #f8f8f2 !important; }
-.hljs-operator, .token.operator { color: #ff79c6 !important; }
+/* Syntax highlighting - Omarchy Matte Black palette (orange accents) */
+.hljs-keyword, .token.keyword { color: #e68e0d !important; }
+.hljs-built_in, .token.builtin { color: #f59e0b !important; }
+.hljs-type, .token.class-name { color: #f59e0b !important; }
+.hljs-literal, .token.boolean { color: #ffc107 !important; }
+.hljs-number, .token.number { color: #ffc107 !important; }
+.hljs-string, .token.string { color: #ffc107 !important; }
+.hljs-comment, .token.comment { color: #555555 !important; font-style: italic; }
+.hljs-function, .token.function { color: #f59e0b !important; }
+.hljs-params { color: #d35f5f !important; }
+.hljs-attr, .token.attr-name { color: #e68e0d !important; }
+.hljs-variable, .token.variable { color: #bebebe !important; }
+.hljs-punctuation, .token.punctuation { color: #8a8a8d !important; }
+.hljs-operator, .token.operator { color: #e68e0d !important; }
 
 /* Tables styling */
 table {
     border-collapse: collapse !important;
-    background-color: #1a0514 !important;
-    border: 1px solid #5c3566 !important;
+    background-color: #090909 !important;
+    border: 1px solid #333333 !important;
     margin: 10px 0 !important;
     width: 100% !important;
 }
 
 th {
-    background-color: #3b0f2b !important;
-    color: #50fa7b !important;
+    background-color: #1e1e1e !important;
+    color: #f59e0b !important;
     padding: 10px 14px !important;
-    border: 1px solid #5c3566 !important;
+    border: 1px solid #333333 !important;
     font-weight: 600 !important;
     text-align: left !important;
 }
 
 td {
     padding: 8px 14px !important;
-    border: 1px solid #5c3566 !important;
-    color: #e0e0e0 !important;
+    border: 1px solid #333333 !important;
+    color: #bebebe !important;
 }
 
 tr:nth-child(even) {
-    background-color: #2d0922 !important;
+    background-color: #0d0d0d !important;
 }
 
 /* Input textbox */
 textarea, input[type="text"] {
-    background-color: #1a0514 !important;
+    background-color: #090909 !important;
     color: #ffffff !important;
-    border: 1px solid #5c3566 !important;
+    border: 1px solid #333333 !important;
     font-family: 'Fira Code', 'Ubuntu Mono', monospace !important;
 }
 
 /* Buttons */
 button.primary, .primary {
-    background-color: #5c3566 !important;
-    color: #ffffff !important;
+    background-color: #e68e0d !important;
+    color: #121212 !important;
     border: none !important;
 }
 
 button.primary:hover, .primary:hover {
-    background-color: #7c4d8a !important;
+    background-color: #f59e0b !important;
 }
 
 /* Labels and text */
 label, .label-text, span {
-    color: #e0e0e0 !important;
+    color: #bebebe !important;
     font-family: 'Fira Code', monospace !important;
 }
 
 /* Accordion headers */
 .accordion {
-    background-color: #2d0922 !important;
-    border: 1px solid #5c3566 !important;
+    background-color: #0d0d0d !important;
+    border: 1px solid #333333 !important;
 }
 
 /* File upload */
 .file-upload {
-    background-color: #1a0514 !important;
-    border: 2px dashed #5c3566 !important;
+    background-color: #090909 !important;
+    border: 2px dashed #333333 !important;
 }
 
 /* Checkboxes */
 input[type="checkbox"] {
-    accent-color: #50fa7b !important;
+    accent-color: #e68e0d !important;
 }
 
 /* Markdown list styling */
 ul, ol {
-    color: #e0e0e0 !important;
+    color: #bebebe !important;
 }
 
 li::marker {
-    color: #ffb86c !important;
+    color: #f59e0b !important;
 }
 
 /* Bold text */
 strong, b {
-    color: #ff79c6 !important;
+    color: #e68e0d !important;
     font-weight: 600 !important;
 }
 
 /* Italic text */
 em, i {
-    color: #bd93f9 !important;
+    color: #f59e0b !important;
 }
 
 /* Links */
 a {
-    color: #8be9fd !important;
+    color: #f59e0b !important;
 }
 
 /* Scrollbar styling */
 ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
-    background-color: #300a24;
+    background-color: #121212;
 }
 
 ::-webkit-scrollbar-thumb {
-    background-color: #5c3566;
+    background-color: #333333;
     border-radius: 4px;
 }
 
 /* Header styling */
 h1, h2, h3, h4 {
-    color: #50fa7b !important;
+    color: #e68e0d !important;
     font-family: 'Fira Code', monospace !important;
 }
 """
@@ -605,24 +606,25 @@ def clear_chat():
 
 
 # Define theme for Gradio 6.0 (passed to launch())
+# Palette: Omarchy "Matte Black" theme (dark background, orange accent)
 TERMINAL_THEME = gr.themes.Base(
-    primary_hue="purple",
+    primary_hue="orange",
     neutral_hue="gray",
 ).set(
-    body_background_fill="#300a24",
-    body_background_fill_dark="#300a24",
-    block_background_fill="#2d0922",
-    block_background_fill_dark="#2d0922",
-    body_text_color="#e0e0e0",
-    body_text_color_dark="#e0e0e0",
-    block_label_text_color="#50fa7b",
-    block_label_text_color_dark="#50fa7b",
-    input_background_fill="#1a0514",
-    input_background_fill_dark="#1a0514",
-    button_primary_background_fill="#5c3566",
-    button_primary_background_fill_dark="#5c3566",
-    button_primary_background_fill_hover="#7c4d8a",
-    button_primary_background_fill_hover_dark="#7c4d8a",
+    body_background_fill="#121212",
+    body_background_fill_dark="#121212",
+    block_background_fill="#0d0d0d",
+    block_background_fill_dark="#0d0d0d",
+    body_text_color="#bebebe",
+    body_text_color_dark="#bebebe",
+    block_label_text_color="#e68e0d",
+    block_label_text_color_dark="#e68e0d",
+    input_background_fill="#090909",
+    input_background_fill_dark="#090909",
+    button_primary_background_fill="#e68e0d",
+    button_primary_background_fill_dark="#e68e0d",
+    button_primary_background_fill_hover="#f59e0b",
+    button_primary_background_fill_hover_dark="#f59e0b",
 )
 
 # Build the Gradio interface
