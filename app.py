@@ -23,9 +23,10 @@ from tools.tools import (
     url_search,
     code_search,
 )
-from utils.prompt import SYSTEM_MESSAGE, append_to_chat_history
+from utils.prompt import SYSTEM_MESSAGE, append_to_chat_history, build_system_message
 
 MAX_TOOL_CALLS = 5
+MAX_TOOL_RESULT_CHARS = 4000
 
 # Terminal-style CSS to mimic Rich console
 TERMINAL_CSS = """
@@ -273,6 +274,39 @@ def dispatch_tool(tool_name, tool_args):
         return f"Error: Unknown tool: {tool_name}"
 
 
+def looks_like_leaked_tool_call(text):
+    """
+    Detect responses where the model emitted raw tool-call syntax as text
+    (happens when tools are removed but the model still tries to call one,
+    e.g. llama.cpp's "Model tried to call unavailable tool" wrapper).
+    """
+    if not text or not text.strip():
+        return True
+    lowered = text.lower()
+    markers = (
+        'function=',
+        '<function',
+        'tried to call unavailable tool',
+        'arguments provided to the tool are invalid',
+    )
+    return any(marker in lowered for marker in markers)
+
+
+NO_MORE_TOOLS_MSG = (
+    "SYSTEM NOTE: The tool-call limit has been reached. Do NOT call any more "
+    "tools and do NOT output tool-call syntax. Answer the user's original "
+    "question directly and completely, using only the tool results you have "
+    "already gathered."
+)
+
+RETRY_NO_TOOLS_MSG = (
+    "Your previous reply contained a tool call or tool-error text instead of "
+    "an answer. No tools are available. Write your final answer to the user's "
+    "original question now, in plain text only, using the tool results already "
+    "provided."
+)
+
+
 def chat(message, history, api_messages, api_url, model_name,
          enable_web_search, search_engine, rag_mode):
     """
@@ -298,6 +332,18 @@ def chat(message, history, api_messages, api_url, model_name,
     user_input = message
     search_results = []
     context_sources = []
+
+    # Only expose tools that are usable in this session. local_rag requires an
+    # ingested PDF collection, so hide it (and its prompt description) until a
+    # PDF has been uploaded.
+    available_tools = tools if rag_ready else [
+        t for t in tools if t["function"]["name"] != "local_rag"
+    ]
+    if api_messages and api_messages[0].get('role') == 'system':
+        api_messages[0] = {
+            'role': 'system',
+            'content': build_system_message(include_local_rag=rag_ready),
+        }
 
     # Pre-query web search (optional, user-toggled)
     if enable_web_search:
@@ -345,7 +391,7 @@ def chat(message, history, api_messages, api_url, model_name,
             model=model_name,
             messages=api_messages,
             stream=True,
-            tools=tools,
+            tools=available_tools,
             tool_choice='auto',
         )
     except APIError as e:
@@ -356,6 +402,7 @@ def chat(message, history, api_messages, api_url, model_name,
 
     # Multi-turn tool-call loop
     tool_call_count = 0
+    tool_call_cache = {}  # Dedupe identical tool calls within this turn
     dangling_stream_content = ''
 
     while tool_call_count < MAX_TOOL_CALLS:
@@ -395,7 +442,24 @@ def chat(message, history, api_messages, api_url, model_name,
             yield history, "", api_messages
             return
 
-        result = dispatch_tool(tool_name, tool_args)
+        # Deduplicate identical tool calls within this turn: the system prompt
+        # limits repeat calls, but gpt-oss does not always follow it.
+        call_key = f"{tool_name}::{json.dumps(tool_args, sort_keys=True)}"
+        if call_key in tool_call_cache:
+            result = tool_call_cache[call_key]
+        else:
+            # Errors are returned to the model as a tool result so it can
+            # recover instead of the whole turn crashing.
+            try:
+                result = dispatch_tool(tool_name, tool_args)
+            except Exception as e:
+                result = f"Error: {tool_name} failed: {e}"
+            result = str(result)
+            if len(result) > MAX_TOOL_RESULT_CHARS:
+                result = result[:MAX_TOOL_RESULT_CHARS] + "\n...[result truncated]"
+            # Cache only successful results so transient errors can be retried.
+            if not result.startswith("Error"):
+                tool_call_cache[call_key] = result
 
         # Record assistant tool-call in API history
         api_messages = append_to_chat_history(
@@ -429,7 +493,7 @@ def chat(message, history, api_messages, api_url, model_name,
                 model=model_name,
                 messages=api_messages,
                 stream=True,
-                tools=tools,
+                tools=available_tools,
                 tool_choice='auto',
             )
         except APIError as e:
@@ -443,11 +507,15 @@ def chat(message, history, api_messages, api_url, model_name,
             "content": f"Warning: Reached maximum tool calls ({MAX_TOOL_CALLS}). Generating final response without tools."
         })
         yield history, "", api_messages
-        # Force a text-only response by omitting tools
+        # Force a text-only response: omit tools and explicitly instruct the
+        # model to synthesize an answer (gpt-oss templates keep tool
+        # descriptions visible in the system prompt, so omitting `tools`
+        # alone may not stop it from emitting raw tool-call text).
+        dangling_stream_content = ''
         try:
             stream = client.chat.completions.create(
                 model=model_name,
-                messages=api_messages,
+                messages=api_messages + [{'role': 'user', 'content': NO_MORE_TOOLS_MSG}],
                 stream=True,
             )
         except APIError as e:
@@ -462,7 +530,6 @@ def chat(message, history, api_messages, api_url, model_name,
         yield history, "", api_messages
 
     # Stream the final assistant response
-    current_response = ''
     buffer = dangling_stream_content
     history.append({"role": "assistant", "content": buffer})
     yield history, "", api_messages
@@ -472,13 +539,54 @@ def chat(message, history, api_messages, api_url, model_name,
             stream_content = event.choices[0].delta.content
             if stream_content is not None:
                 buffer += stream_content
-                current_response += stream_content
                 history[-1] = {"role": "assistant", "content": buffer}
                 yield history, "", api_messages
     except Exception as e:
         history[-1] = {"role": "assistant", "content": buffer + f"\n\nError during streaming: {e}"}
         yield history, "", api_messages
         return
+
+    # Safety net: if the response is empty or still looks like raw tool-call
+    # text (llama.cpp wraps unresolvable tool calls in an error message that
+    # arrives as content), retry once with a stronger no-tools instruction.
+    if looks_like_leaked_tool_call(buffer):
+        history[-1] = {
+            "role": "assistant",
+            "content": "*Model attempted another tool call instead of answering; retrying...*"
+        }
+        yield history, "", api_messages
+        retry_messages = api_messages + [
+            {'role': 'user', 'content': NO_MORE_TOOLS_MSG},
+            {'role': 'assistant', 'content': buffer},
+            {'role': 'user', 'content': RETRY_NO_TOOLS_MSG},
+        ]
+        buffer = ''
+        history[-1] = {"role": "assistant", "content": ""}
+        yield history, "", api_messages
+        try:
+            retry_stream = client.chat.completions.create(
+                model=model_name,
+                messages=retry_messages,
+                stream=True,
+            )
+            for event in retry_stream:
+                stream_content = event.choices[0].delta.content
+                if stream_content is not None:
+                    buffer += stream_content
+                    history[-1] = {"role": "assistant", "content": buffer}
+                    yield history, "", api_messages
+        except Exception as e:
+            history[-1] = {"role": "assistant", "content": buffer + f"\n\nError during retry streaming: {e}"}
+            yield history, "", api_messages
+            return
+
+        if looks_like_leaked_tool_call(buffer):
+            buffer = (
+                "The model reached the tool-call limit and could not produce a "
+                "final answer. Please rephrase the question or narrow the scope."
+            )
+            history[-1] = {"role": "assistant", "content": buffer}
+            yield history, "", api_messages
 
     # Append sources footer
     if context_sources:
@@ -487,7 +595,7 @@ def chat(message, history, api_messages, api_url, model_name,
         yield history, "", api_messages
 
     # Record final assistant response in API history
-    api_messages = append_to_chat_history('assistant', current_response, api_messages)
+    api_messages = append_to_chat_history('assistant', buffer, api_messages)
     yield history, "", api_messages
 
 

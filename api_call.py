@@ -17,11 +17,81 @@ from tools.tools import (
     url_search, 
     code_search
 )
-from utils.prompt import SYSTEM_MESSAGE, append_to_chat_history
+from utils.prompt import (
+    SYSTEM_MESSAGE, 
+    append_to_chat_history, 
+    build_system_message, 
+    build_system_message
+)
 
 import argparse
 import sys
 import json
+
+# Instruction appended when forcing a final text answer after the tool-call
+# budget is exhausted. gpt-oss chat templates keep tool descriptions visible in
+# the system prompt, so simply omitting `tools` from the request is not always
+# enough to stop the model from emitting raw tool-call text.
+FINAL_ANSWER_INSTRUCTION = (
+    "SYSTEM NOTE: The tool-call limit has been reached and no tools are "
+    "available for this reply. Do not call any tools and do not output any "
+    "tool-call syntax. Answer the user's original question directly and "
+    "completely, synthesizing only from the tool results already provided above."
+)
+
+RETRY_ANSWER_INSTRUCTION = (
+    "Your previous reply contained a tool call or tool-error text instead of "
+    "an answer. No tools are available for this reply. Write your final answer "
+    "to the user's original question now, in plain text only, using the tool "
+    "results already provided."
+)
+
+
+def looks_like_leaked_tool_call(text):
+    """
+    True if text is empty or looks like raw tool-call syntax / tool-error text
+    rather than a real assistant answer (llama.cpp wraps tool calls it cannot
+    resolve into an error message that arrives as ordinary content).
+    """
+    if not text or not text.strip():
+        return True
+    lowered = text.lower()
+    markers = (
+        '<function=',
+        'tried to call unavailable tool',
+        'arguments provided to the tool are invalid',
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def stream_final_response(console, client, model, messages=None, stream=None, initial_buffer=''):
+    """Consume a completion stream via Rich Live and return the full text.
+
+    Pass `messages` to start a new (tool-less) request, or `stream` to consume
+    an already-open one.
+    """
+    if stream is None:
+        stream = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=True,
+        )
+    buffer = initial_buffer
+    console.print("[bold green]Assistant:[/bold green] ")
+    with Live(
+        Markdown(buffer),
+        console=console,
+        refresh_per_second=10,
+        vertical_overflow='ellipsis'
+    ) as live:
+        for event in stream:
+            stream_content = event.choices[0].delta.content
+            if stream_content is not None:
+                buffer += stream_content
+                live.update(Markdown(buffer))
+    console.print()
+    return buffer
+
 
 parser = argparse.ArgumentParser(
     description='RAG-powered chatbot with optional web search and local PDF support'
@@ -82,8 +152,15 @@ except Exception as e:
     sys.exit(1)
 
 # Manage initial chat history.
+# Only advertise tools that are actually usable in this session: local_rag
+# requires an ingested document, otherwise the model may call it and fail.
+rag_loaded = args.local_rag is not None or args.rag_tool is not None
+available_tools = tools if rag_loaded else [
+    t for t in tools if t["function"]["name"] != "local_rag"
+]
+
 chat_history = []
-chat_history = append_to_chat_history('system', SYSTEM_MESSAGE, chat_history)
+chat_history = append_to_chat_history('system', build_system_message(include_local_rag=rag_loaded), chat_history)
 messages = chat_history
 
 ### Embed document for vector search ###
@@ -184,7 +261,7 @@ def run_chat_loop(client, args, messages, console):
                     model=args.model,
                     messages=messages,
                     stream=True,
-                    tools=tools,
+                    tools=available_tools,
                     tool_choice='auto',
                 )
 
@@ -199,7 +276,9 @@ def run_chat_loop(client, args, messages, console):
             # Multi-turn tool call loop. 
             # The assistant will keep on calling needed tools until it's ready to respond.
             MAX_TOOL_CALLS = 5  # Safety limit to prevent infinite loops
+            MAX_TOOL_RESULT_CHARS = 4000  # Cap tool results to avoid context bloat
             tool_call_count = 0
+            tool_call_cache = {}  # Dedupe identical tool calls within this turn
             dangling_stream_content = ''
 
             while tool_call_count < MAX_TOOL_CALLS:
@@ -224,18 +303,44 @@ def run_chat_loop(client, args, messages, console):
                 console.print(f"[bold cyan]Tool call {tool_call_count}: {tool_name} ::: Args: {tool_args}[/bold cyan]")
                 tool_args = json.loads(tool_args)
         
-                # Execute tool call.
-                if tool_name == 'search_web':
-                    result = search_web(**tool_args)
-                elif tool_name == 'local_rag':
-                    result = local_rag(**tool_args)
-                elif tool_name == 'url_search':
-                    result = url_search(**tool_args)
-                elif tool_name == 'code_search':
-                    result = code_search(**tool_args)
+                # Deduplicate repeated tool calls: the system prompt limits
+                # repeat calls, but gpt-oss does not always follow it. If an
+                # identical call was already made, return the prior result
+                # instead of executing the tool again.
+                call_key = f"{tool_name}::{json.dumps(tool_args, sort_keys=True)}"
+                if call_key in tool_call_cache:
+                    console.print(f"[yellow]Duplicate tool call skipped: {tool_name}[/yellow]")
+                    result = tool_call_cache[call_key]
                 else:
-                    console.print(f"[yellow]Warning: Unknown tool: {tool_name}[/yellow]")
-                    result = f"Error: Unknown tool: {tool_name}"
+                    # Execute tool call. Errors are returned to the model as a
+                    # tool result so it can recover instead of crashing the turn.
+                    try:
+                        if tool_name == 'search_web':
+                            result = search_web(**tool_args)
+                        elif tool_name == 'local_rag':
+                            result = local_rag(**tool_args)
+                        elif tool_name == 'url_search':
+                            result = url_search(**tool_args)
+                        elif tool_name == 'code_search':
+                            result = code_search(**tool_args)
+                        else:
+                            console.print(f"[yellow]Warning: Unknown tool: {tool_name}[/yellow]")
+                            result = f"Error: Unknown tool: {tool_name}"
+                    except TypeError as e:
+                        console.print(f"[yellow]Warning: Invalid arguments for {tool_name}: {e}[/yellow]")
+                        result = f"Error: invalid arguments for {tool_name}: {e}"
+                    except Exception as e:
+                        console.print(f"[yellow]Warning: {tool_name} failed: {e}[/yellow]")
+                        result = f"Error: {tool_name} failed: {e}"
+
+                    # Truncate oversized tool results to avoid context bloat.
+                    result = str(result)
+                    if len(result) > MAX_TOOL_RESULT_CHARS:
+                        result = result[:MAX_TOOL_RESULT_CHARS] + "\n...[result truncated]"
+
+                    # Cache only successful results so transient errors can be retried.
+                    if not result.startswith("Error"):
+                        tool_call_cache[call_key] = result
 
                 # Append assistant message with tool call to chat history.
                 messages = append_to_chat_history(
@@ -264,12 +369,25 @@ def run_chat_loop(client, args, messages, console):
                     model=args.model,
                     messages=messages,
                     stream=True,
-                    tools=tools,
+                    tools=available_tools,
                     tool_choice='auto',
                 )
 
             if tool_call_count >= MAX_TOOL_CALLS:
                 console.print(f"[yellow]Warning: Reached maximum tool calls ({MAX_TOOL_CALLS})[/yellow]")
+                # Force a final text response: the last stream in the loop was
+                # requested with tools, so the model may emit another tool call
+                # whose content would never render. Re-issue without tools and
+                # with an explicit instruction to synthesize an answer.
+                dangling_stream_content = ''
+                stream = client.chat.completions.create(
+                    model=args.model,
+                    messages=messages + [{
+                        'role': 'user',
+                        'content': FINAL_ANSWER_INSTRUCTION
+                    }],
+                    stream=True,
+                )
             
             if tool_call_count > 0:
                 console.print(f"[dim] Total tools called: {tool_call_count}. Fetching final response...[/dim]")
@@ -278,31 +396,28 @@ def run_chat_loop(client, args, messages, console):
             # No tool call, just collect assistant response.
             # The logical flow also comes here when tool call is done and we 
             # are streaming final response.
-            current_response = ''
-            buffer = ''
-            # print(f"Dangling stream content: '{dangling_stream_content}'")
-            if len(dangling_stream_content) > 0:
-                # console.print(f"[dim] Dangling string: '{dangling_stream_content}'[/dim]")
-                buffer += dangling_stream_content
-            console.print("[bold green]Assistant:[/bold green] ")
-            with Live(
-                Markdown(''), 
-                console=console, 
-                refresh_per_second=10,
-                # vertical_overflow='visible'
-                vertical_overflow='ellipsis'
-            ) as live:
-                for event in stream:
-                    stream_content = event.choices[0].delta.content
-                    if stream_content is not None:
-                        buffer += stream_content
-                        live.update(Markdown(buffer))
-                        current_response += stream_content
+            current_response = stream_final_response(
+                console, client, args.model,
+                stream=stream,
+                initial_buffer=dangling_stream_content
+            )
 
-                messages = append_to_chat_history('assistant', current_response, messages)
-                console.print()
-                if context_sources:
-                    console.print(f"[dim](Sources: {', '.join(context_sources)})[/dim]")
+            # Safety net: if the model still emitted raw tool-call text (or
+            # nothing at all), retry once with a stronger instruction.
+            if looks_like_leaked_tool_call(current_response):
+                console.print("[yellow]Model returned a tool call instead of an answer; retrying...[/yellow]")
+                current_response = stream_final_response(
+                    console, client, args.model,
+                    messages=messages + [
+                        {'role': 'user', 'content': FINAL_ANSWER_INSTRUCTION},
+                        {'role': 'assistant', 'content': current_response},
+                        {'role': 'user', 'content': RETRY_ANSWER_INSTRUCTION},
+                    ]
+                )
+
+            messages = append_to_chat_history('assistant', current_response, messages)
+            if context_sources:
+                console.print(f"[dim](Sources: {', '.join(context_sources)})[/dim]")
 
             console.print()
             
