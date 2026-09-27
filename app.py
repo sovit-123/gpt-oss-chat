@@ -1,5 +1,5 @@
 """
-Gradio Web UI for RAG-powered chatbot with terminal-style aesthetics.
+Gradio Web UI for RAG-powered chatbot.
 Styled to look like Rich console output with dark theme, syntax highlighting,
 and formatted tables.
 """
@@ -34,8 +34,7 @@ API_KEY = os.getenv("MODAL_API_KEY", "default")
 MAX_TOOL_CALLS = 5
 MAX_TOOL_RESULT_CHARS = 4000
 
-# Terminal-style CSS to mimic Rich console
-# Palette: Omarchy "Matte Black" theme (dark background, orange accent)
+# Palette: "Matte Black" theme (dark background, orange accent)
 TERMINAL_CSS = """
 /* Import monospace font */
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&display=swap');

@@ -1,14 +1,14 @@
 # gpt-oss-chat
 
-A simple local RAG + web search pipeline powered by gpt-oss-20b via llama.cpp and similar scale models like NVIDIA Nemotron 3 Nano 30B A3B.
+A simple local RAG + web search pipeline powered by **llama.cpp**, **vLLM**, and **OpenAI compatible Modal enpoints**.
 
 **Terminal chat powered by Rich Console UI**
 
-![](assets/gpt-oss-chat-terminal.png) 
+![](assets/gpt-oss-chat-new-tui-1.png) 
 
-**Gradio chat with a terminal theme**
+**UI chat**
 
-![](assets/gpt-oss-chat-ui.png)
+![](assets/gpt-oss-chat-new-ui-1.png)
 
 ## Setup Steps
 
@@ -18,11 +18,12 @@ A simple local RAG + web search pipeline powered by gpt-oss-20b via llama.cpp an
 
 * Run `pip install -r requirements.txt`
 
-* Create a `.env` file and add the [Tavily](https://www.tavily.com/) API key for web search. Optionally, you can also add the [Perplexity API key](https://docs.perplexity.ai/guides/search-quickstart).
+* Create a `.env` file and add the [Tavily](https://www.tavily.com/) API key for web search. Optionally, you can also add the [Perplexity API key](https://docs.perplexity.ai/guides/search-quickstart). If you plan to use [Modal](https://modal.com/) endpoints, add the Modal API key here as well.
 
   ```
   TAVILY_API_KEY=YOUR_TAVILY_API_KEY
   PERPLEXITY_API_KEY=YOUR_PERPLEXITY_API_KEY
+  MODAL_API_KEY=YOUR_MODAL_API_KEY
   ```
 
 ## Running
@@ -44,6 +45,34 @@ python api_call.py
 ```
 python app.py
 ```
+
+### Using vLLM and Modal Endpoints
+
+Other than llama.cpp, the chat can be driven by any OpenAI-compatible endpoint. Locally hosted vLLM servers and Modal endpoints are both supported.
+
+**Using a local vLLM endpoint:**
+
+Start the vLLM server with tool calling enabled. The `--tool-call-parser` depends on the model family, e.g. `qwen3_coder` for Qwen3.5 models:
+
+```
+vllm serve Qwen/Qwen3.5-0.8B --port 8000 --enable-auto-tool-choice --tool-call-parser qwen3_coder
+```
+
+* If you are using `app.py`, first change the **API URL** to `http://localhost:{port}/v1`, and then change the **Model Name** to the exact model that is being launched. Both options are available in the **Settings** sidebar.
+* If you are using `api_call.py`, the same changes are available as the `--api-url` and `--model` command line arguments:
+
+  ```
+  python api_call.py --api-url http://localhost:8000/v1 --model Qwen/Qwen3.5-0.8B
+  ```
+
+**Using Modal endpoints:**
+
+Two types of Modal endpoints are supported, and both are used in the same way:
+
+1. **Self-hosted endpoints:** after hosting a model on Modal, you get an endpoint URL like `https://{ORG_NAME}--ep-glm-5-3-flash-nvfp4-server.us-west.modal.direct`.
+2. **Endpoints that use shared compute:** used exactly the same way as above.
+
+In both cases, pass the endpoint URL to the **API URL** field in `app.py`, or to the `--api-url` argument in `api_call.py`. Unlike a local vLLM server, the model name does not need to be changed here. Modal requires authentication, so make sure to add the `MODAL_API_KEY` value to the `.env` file (see the [Setup Steps](#setup-steps)) before connecting.
 
 ### Advanced Usage in Terminal Mode
 
