@@ -1,3 +1,5 @@
+import os
+
 from openai import OpenAI, APIError
 from web_search import do_web_search
 from semantic_engine import (
@@ -23,10 +25,15 @@ from utils.prompt import (
     build_system_message, 
     build_system_message
 )
+from dotenv import load_dotenv
 
 import argparse
 import sys
 import json
+
+load_dotenv()
+
+API_KEY = os.getenv("MODAL_API_KEY", "default")
 
 # Instruction appended when forcing a final text answer after the tool-call
 # budget is exhausted. gpt-oss chat templates keep tool descriptions visible in
@@ -146,7 +153,7 @@ console = Console()
 
 # Initialize OpenAI client
 try:
-    client = OpenAI(base_url=args.api_url, api_key='default')
+    client = OpenAI(base_url=args.api_url, api_key=API_KEY)
 except Exception as e:
     console.print(f"[red]Error: Failed to initialize OpenAI client: {e}[/red]")
     sys.exit(1)
@@ -279,29 +286,72 @@ def run_chat_loop(client, args, messages, console):
             MAX_TOOL_RESULT_CHARS = 4000  # Cap tool results to avoid context bloat
             tool_call_count = 0
             tool_call_cache = {}  # Dedupe identical tool calls within this turn
-            dangling_stream_content = ''
 
+            # vLLM/Qwen can emit preamble text AND a tool call in the same
+            # response, so each pass collects content and tool-call deltas
+            # together instead of assuming "content started => no tool call"
+            # (that only holds for gpt-oss on llama.cpp). Text streams to the
+            # terminal as it arrives; if a tool call follows, the collected
+            # text stays visible as a preamble.
             while tool_call_count < MAX_TOOL_CALLS:
-                tool_args = ''
+                tool_args_str = ''
                 tool_name = None
                 tool_id = None
+                first_call_index = None
+                buffer = ''  # Text of this response (preamble or final answer)
+                live = None  # Rich Live display, started lazily on first text
 
-                for event in stream:
-                    if event.choices[0].delta.tool_calls is not None:
-                        if event.choices[0].delta.tool_calls[0].function.name is not None:
-                            tool_name = event.choices[0].delta.tool_calls[0].function.name
-                            tool_id = event.choices[0].delta.tool_calls[0].id
-                        tool_args += event.choices[0].delta.tool_calls[0].function.arguments
-                    if event.choices[0].delta.content is not None:
-                        dangling_stream_content = event.choices[0].delta.content
-                        break
+                try:
+                    for event in stream:
+                        # Skip keep-alive/usage chunks with empty choices (vLLM sends them).
+                        if len(event.choices) == 0:
+                            continue
+                        delta = event.choices[0].delta
+                        if delta.tool_calls:
+                            tool_call = delta.tool_calls[0]
+                            if first_call_index is None:
+                                first_call_index = tool_call.index
+                            if tool_call.index != first_call_index:
+                                # Parallel calls: only the first is executed per pass.
+                                console.print(f"[yellow]Ignoring parallel tool call at index {tool_call.index}[/yellow]")
+                                continue
+                            if tool_call.id is not None:
+                                tool_id = tool_call.id
+                            if tool_call.function and tool_call.function.name is not None:
+                                tool_name = tool_call.function.name
+                            if tool_call.function and tool_call.function.arguments:
+                                tool_args_str += tool_call.function.arguments
+                        if delta.content:
+                            if live is None:
+                                console.print("[bold green]Assistant:[/bold green] ")
+                                live = Live(
+                                    Markdown(buffer),
+                                    console=console,
+                                    refresh_per_second=10,
+                                    vertical_overflow='ellipsis'
+                                )
+                                live.start()
+                            buffer += delta.content
+                            live.update(Markdown(buffer))
+                finally:
+                    if live is not None:
+                        live.stop()
+                        console.print()
+
+                print(f"Tool call detected: {tool_name} with args: {tool_args_str}")
 
                 if tool_name is None:
+                    # Pure text response: it is the final answer, already streamed.
                     break
 
                 tool_call_count += 1
-                console.print(f"[bold cyan]Tool call {tool_call_count}: {tool_name} ::: Args: {tool_args}[/bold cyan]")
-                tool_args = json.loads(tool_args)
+                console.print(f"[bold cyan]Tool call {tool_call_count}: {tool_name} ::: Args: {tool_args_str}[/bold cyan]")
+
+                try:
+                    tool_args = json.loads(tool_args_str)
+                except json.JSONDecodeError:
+                    console.print(f"[yellow]Warning: Could not parse tool arguments for {tool_name}: {tool_args_str}[/yellow]")
+                    break
         
                 # Deduplicate repeated tool calls: the system prompt limits
                 # repeat calls, but gpt-oss does not always follow it. If an
@@ -364,7 +414,7 @@ def run_chat_loop(client, args, messages, console):
                 # Make another API call to let the model decide:
                 # - Call another tool, OR
                 # - Generate the final text response.
-                console.print(f"[dim]Checking if more tools are needed...[/dim]")
+                console.print(f"[dim]Checking if more tools are needed... ({tool_call_count}/{MAX_TOOL_CALLS})[/dim]")
                 stream = client.chat.completions.create(
                     model=args.model,
                     messages=messages,
@@ -373,13 +423,16 @@ def run_chat_loop(client, args, messages, console):
                     tool_choice='auto',
                 )
 
+            # `current_response` now holds the final assistant response in
+            # every path: either the tool loop already streamed it (the model
+            # answered with text only), or it is streamed below after the
+            # tool-call budget forced a text-only reply.
             if tool_call_count >= MAX_TOOL_CALLS:
                 console.print(f"[yellow]Warning: Reached maximum tool calls ({MAX_TOOL_CALLS})[/yellow]")
                 # Force a final text response: the last stream in the loop was
                 # requested with tools, so the model may emit another tool call
                 # whose content would never render. Re-issue without tools and
                 # with an explicit instruction to synthesize an answer.
-                dangling_stream_content = ''
                 stream = client.chat.completions.create(
                     model=args.model,
                     messages=messages + [{
@@ -388,19 +441,11 @@ def run_chat_loop(client, args, messages, console):
                     }],
                     stream=True,
                 )
-            
-            if tool_call_count > 0:
-                console.print(f"[dim] Total tools called: {tool_call_count}. Fetching final response...[/dim]")
-                console.print()
-
-            # No tool call, just collect assistant response.
-            # The logical flow also comes here when tool call is done and we 
-            # are streaming final response.
-            current_response = stream_final_response(
-                console, client, args.model,
-                stream=stream,
-                initial_buffer=dangling_stream_content
-            )
+                current_response = stream_final_response(
+                    console, client, args.model, stream=stream
+                )
+            else:
+                current_response = buffer
 
             # Safety net: if the model still emitted raw tool-call text (or
             # nothing at all), retry once with a stronger instruction.
