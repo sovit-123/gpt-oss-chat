@@ -25,5 +25,8 @@ and merged sections are never edited again. Format loosely follows
 ### Fixed
 - `--rag-tool` with a bad path printed "PDF file not found: None"; it
   now prints the actual path.
+- Fresh installs could not run the web UI: `gradio` was missing from
+  `requirements.txt`. Test dependencies now live in
+  `requirements-dev.txt`.
 - Hitting the tool-call budget no longer fires one wasted model request
   before forcing the final answer.
