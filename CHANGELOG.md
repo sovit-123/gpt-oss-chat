@@ -8,7 +8,7 @@ to main, Unreleased is retitled to its merge date plus a short title,
 and merged sections are never edited again. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com).
 
-## [Unreleased]
+## 30 September, 2026 - Core Engine Refactor
 
 ### Added
 - Chat engine, tool registry, and the project's first test suite in
