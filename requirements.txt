@@ -7,3 +7,4 @@ qdrant-client==1.19.0
 PyMuPDF==1.28.2
 rich==15.0.0
 python-dotenv==1.2.3
+gradio==6.27.0
