@@ -23,15 +23,13 @@ load_dotenv()
 
 console = Console()
 
-# Status events are plain data, so the engine cannot know which messages
-# deserve alarm coloring. This frontend guesses from the wording, which
-# keeps every display decision in this file.
+# The engine cannot know which status messages deserve alarm coloring,
+# so this frontend guesses from the wording.
 WARNING_MARKERS = ("failed", "duplicate", "could not")
 
 
 def parse_args():
-    """Same CLI as before the refactor. The interface did not change; the
-    flags now feed an EngineConfig instead of a hand-rolled loop."""
+    """Command line arguments, unchanged from before the refactor."""
     parser = argparse.ArgumentParser(
         description='RAG-powered chatbot with optional web search and local PDF support'
     )
@@ -65,8 +63,8 @@ def parse_args():
 
 
 def build_config(args):
-    """Maps the CLI flags onto the engine settings for one turn. Built
-    once before the loop because terminal flags cannot change mid-session."""
+    """Turns CLI flags into EngineConfig settings. Built once before the
+    loop, since terminal flags cannot change mid-session."""
     if args.local_rag:
         rag_mode = "always_on"
     elif args.rag_tool:
@@ -82,10 +80,8 @@ def build_config(args):
 
 
 def ingest_document(pdf_path):
-    """Reads the PDF, chunks it and fills the in-memory Qdrant collection.
-    semantic_engine is imported here rather than at the top, so starting
-    the chat without a document never loads the sentence-transformers
-    model that semantic_engine pulls in at import time."""
+    """Reads the PDF, chunks it and fills the Qdrant collection.
+    semantic_engine is imported here to keep startup light."""
     from semantic_engine import (
         read_pdf, chunk_text, create_and_upload_in_mem_collection,
     )
@@ -100,9 +96,9 @@ def ingest_document(pdf_path):
 
 
 def render(event_stream):
-    """Turns one turn's engine events into Rich output: streamed markdown
-    for assistant text, cyan lines for tool calls, dim or yellow for
-    status notes. Tool results are not shown, matching the old TUI."""
+    """Prints the engine's events as Rich output: streamed markdown for
+    text, cyan lines for tool calls, dim or yellow status lines. Tool
+    results are not shown."""
     live = None
     buffer = ""
     try:
@@ -119,8 +115,8 @@ def render(event_stream):
                 live.update(Markdown(buffer))
                 continue
             if live is not None:
-                # A tool call or status note interrupts the text segment;
-                # close it so the next text opens a fresh block.
+                # A tool call or status line interrupts the text; close
+                # the block so the next text opens a fresh one.
                 live.stop()
                 console.print()
                 live = None
@@ -149,9 +145,12 @@ def render(event_stream):
 def main():
     args = parse_args()
     try:
+        # 120s instead of the SDK's ten-minute default, so a stalled
+        # stream fails fast.
         client = OpenAI(
             base_url=args.api_url,
             api_key=os.getenv("MODAL_API_KEY", "default"),
+            timeout=120.0,
         )
     except Exception as e:
         console.print(f"[red]Error: Failed to initialize OpenAI client: {e}[/red]")

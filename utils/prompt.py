@@ -1,3 +1,6 @@
+"""Builds the system prompt. Only describes tools that are actually
+available in the session."""
+
 _TOOL_DESCRIPTIONS = {
     "search_web": (
         "Search the web for up-to-date information on any topic. You have access "
@@ -14,11 +17,13 @@ _TOOL_DESCRIPTIONS = {
 }
 
 
-def build_system_message(include_local_rag=True):
+def build_system_message(include_local_rag=True, max_tool_calls=5):
     """
-    Build the system prompt, hiding the local_rag tool description when no
-    document has been loaded. Keeping the prompt consistent with the tools
-    actually offered prevents the model from calling an unavailable tool.
+    Builds the system prompt.
+
+    `include_local_rag=False` leaves the local_rag tool out of the prompt,
+    so the model does not try to call a tool that is not offered.
+    `max_tool_calls` is the engine's budget for the turn.
     """
     names = ["search_web", "url_search", "code_search"]
     if include_local_rag:
@@ -54,7 +59,7 @@ def build_system_message(include_local_rag=True):
             "Never call local_rag more than once, as it can be resource-intensive."
         )
     limit_rules.append(
-        "Never call more than 3 calls in total to avoid excessive tool usage."
+        f"Never call more than {max_tool_calls} calls in total to avoid excessive tool usage."
     )
     limit_lines = "\n".join(
         f"{i}. {rule}" for i, rule in enumerate(limit_rules, start=1)
@@ -76,36 +81,3 @@ def build_system_message(include_local_rag=True):
         "ALWAYS ENSURE THIS: \n"
         f"{limit_lines}\n"
     )
-
-
-SYSTEM_MESSAGE = build_system_message(include_local_rag=True)
-
-def append_to_chat_history(
-    role=None, 
-    content=None, 
-    chat_history=None, 
-    tool_call_id=None,
-    tool_identifier=False,
-    tool_name=None,
-    tool_args=None
-):
-    if tool_identifier:
-        chat_history.append({
-            "role": role,
-            "content": content,
-            "tool_calls": [{
-                "id": tool_call_id,
-                "type": "function", 
-                "function": {
-                    "name": tool_name,
-                    "arguments": tool_args
-                }
-            }]
-        })
-        return chat_history
-    if tool_call_id is not None:
-        chat_history.append({'role': role, 'content': content, 'tool_call_id': tool_call_id})
-    else:
-        chat_history.append({'role': role, 'content': content})
-
-    return chat_history

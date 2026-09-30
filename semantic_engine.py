@@ -1,11 +1,10 @@
 """
-This python script reads a PDF, extracts its text content, chunks into 
+This python script reads a PDF, extracts its text content, chunks into
 512 character pieces, and encodes each chunk into a vector using the
 Qdrant vector database and SentenceTransformer 'all-MiniLM-L6-v2' model.
 
-The embedding model and the Qdrant client load lazily on first use:
-importing this module is cheap and works offline, which is what lets the
-engine and the frontends import it without paying for a model load.
+The embedding model and the Qdrant client are created lazily on first
+use.
 """
 
 
@@ -18,10 +17,7 @@ _qdrant_client = None
 
 
 def _get_encoder():
-    """Loads the embedding model on first use. Loading it at import time
-    made every import of this module slow and network-dependent, and the
-    lazy imports scattered through the engine and frontends were all
-    workarounds for that."""
+    """Loads the embedding model on first use."""
     global _encoder
     if _encoder is None:
         from sentence_transformers import SentenceTransformer
@@ -30,8 +26,7 @@ def _get_encoder():
 
 
 def _get_qdrant():
-    """Creates the in-memory Qdrant client on first use, so importing
-    this module never touches the database stack."""
+    """Creates the in-memory Qdrant client on first use."""
     global _qdrant_client
     if _qdrant_client is None:
         _qdrant_client = QdrantClient(':memory:')
@@ -131,27 +126,3 @@ def search_query(query, collection_name='my_collection', top_k=3):
     search_results = [hit.payload['text'] for hit in hits]
     
     return hits, search_results
-
-if __name__ == '__main__':
-    full_text = read_pdf('input/yolov1/1506.02640v5.pdf')
-
-    print('Reading and creating chunks...')
-    documents = chunk_text(full_text, chunk_size=512, overlap=50)
-    print(f"Total chunks created: {len(documents)}")
-    
-    print('Creating Qdrant collection...')
-
-    create_and_upload_in_mem_collection(documents=documents)
-
-    # Dummy search.
-    hits, retrieved_list = search_query('YOLOv1 is a ')
-    print('#' * 50)
-
-    print('HITS:')
-    print(hits)
-    print('#' * 50)
-    for hit in hits:
-        print(hit.payload, 'score:', hit.score)
-    print('#' * 50)
-    print('RETRIEVED LIST:')
-    print(retrieved_list)

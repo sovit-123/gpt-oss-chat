@@ -1,24 +1,23 @@
-"""The chat engine yields these events while it works through a user's
-message. Each one describes a single thing that happened, like a piece of
-streamed text, a tool call, or the finished answer. Events are plain data
-with no display logic in them: deciding how they look on screen is
-entirely the job of the frontend that receives them."""
+"""Events emitted by the engine during a turn.
+
+Each event describes one thing that happened: a chunk of streamed text,
+a tool call, the final answer, and so on. They carry data only; the
+frontends decide how to show them."""
 
 from dataclasses import dataclass
 
 
 @dataclass
 class AssistantDelta:
-    """A piece of streamed assistant text. It may be a preamble the model
-    writes before calling a tool, or the final answer itself."""
+    """Streamed assistant text. Either the final answer, or a preamble
+    the model writes before calling a tool."""
     text: str
 
 
 @dataclass
 class ToolCallStarted:
-    """The model wants to run a tool. `number` counts tool calls within
-    the current turn, starting at 1, so a frontend can print things like
-    "Tool call 2 of 5"."""
+    """The model requested a tool. `number` is the 1-based count of tool
+    calls within this turn."""
     number: int
     name: str
     args: dict
@@ -26,9 +25,8 @@ class ToolCallStarted:
 
 @dataclass
 class ToolResult:
-    """The result of running a tool. The chat frontends do not show this
-    directly, but tests read it to check what the engine did, and a future
-    API can send it to clients unchanged."""
+    """Result of a tool call. The frontends do not display it, but tests
+    read it and an API client would want it."""
     number: int
     name: str
     output: str
@@ -37,23 +35,20 @@ class ToolResult:
 
 @dataclass
 class Status:
-    """A progress or warning message meant for the user to read, such as
-    "Checking if more tools are needed (2/5)"."""
+    """A progress or warning message shown to the user, e.g. "Checking
+    if more tools are needed (2/5)"."""
     message: str
 
 
 @dataclass
 class TurnFinished:
-    """The complete final answer for the turn, yielded once at the end.
-    `sources` lists where any pre-fetched context came from, for example
-    "web search (tavily)" or "local RAG"."""
+    """The final answer, yielded once at the end of the turn. `sources`
+    names where the context came from, e.g. "web search (tavily)"."""
     answer: str
     sources: list
 
 
 @dataclass
 class Error:
-    """Something went wrong and the turn ended early. The session is still
-    usable afterwards, so the frontend can show the error and let the user
-    try again."""
+    """The turn failed. The session is still usable for the next turn."""
     message: str

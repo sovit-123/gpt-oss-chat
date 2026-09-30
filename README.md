@@ -1,6 +1,6 @@
 # gpt-oss-chat
 
-A simple local RAG + web search pipeline powered by **llama.cpp**, **vLLM**, and **OpenAI compatible Modal enpoints**.
+A simple local RAG + web search pipeline powered by **llama.cpp**, **vLLM**, and **OpenAI compatible Modal endpoints**.
 
 **Terminal chat powered by Rich Console UI**
 
@@ -173,3 +173,28 @@ The snippet shows the typical import, model loading, processor setup, and a simp
  )                                                      
 ```
 
+
+
+
+## Testing
+
+```
+pip install -r requirements-dev.txt
+python -m pytest tests/
+```
+
+The suite runs against a scripted fake model, so it needs no server and
+no API keys.
+
+
+## Project Structure
+
+- `core/` - the chat engine. `Engine.run_turn()` yields typed events
+  (`core/events.py`) that carry everything worth displaying, and
+  `core/registry.py` maps tool names to the functions that run them.
+- `api_call.py` - terminal UI: CLI flags become an `EngineConfig`, and
+  engine events become Rich output.
+- `app.py` - Gradio web UI: sidebar widgets become an `EngineConfig`,
+  and engine events become chat bubbles.
+- `semantic_engine.py`, `web_search.py`, `tools/`, `utils/` - the RAG
+  pipeline, search APIs, and tool implementations the engine drives.

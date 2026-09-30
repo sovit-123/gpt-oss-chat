@@ -1,9 +1,6 @@
-"""Checks that semantic_engine stays cheap to import.
-
-The embedding model used to load at import time, which made every import
-of the module slow and network-dependent. The check runs in a fresh
-subprocess so no other test in the suite can pollute it.
-"""
+"""Checks that importing semantic_engine stays cheap: the embedding
+model must not load at import time. Runs in a subprocess so no other
+test can pollute the check."""
 
 import subprocess
 import sys

@@ -1,18 +1,11 @@
-"""The chat engine: the single place where one conversation turn happens.
+"""Runs a conversation turn and reports what happens as events.
 
-A turn starts when the user sends a message and ends when the assistant
-has produced a final answer. Along the way the engine may run web
-searches, retrieve passages from an uploaded document, execute tools the
-model asks for, and call the model several times. Everything worth
-showing the user is yielded as an event from core.events, so the terminal
-and the Gradio frontends can render the same conversation each in their
-own way.
-
-Two rules hold throughout this file. The engine never touches the
-screen: no print(), no Rich, no Gradio, only events. And it never runs a
-tool itself, because that is the registry's job. New tools plug into
-the registry and this file does not change.
-"""
+A turn starts with the user's message and ends with the assistant's
+final answer. Along the way the engine may fetch web or document
+context, run tool calls the model asks for, and call the model several
+times. Everything worth showing is yielded as an event (see
+core.events). Tools always run through the registry, and nothing in
+this file ever prints."""
 
 import json
 from dataclasses import dataclass, field
@@ -52,20 +45,17 @@ LEAKED_TOOL_MARKERS = (
 
 @dataclass
 class Session:
-    """What survives between turns of one conversation: the OpenAI-format
-    message history and whether a document is currently loaded for RAG.
-    The frontend owns the Session and hands it to the engine on every
-    turn; the engine is the only thing that mutates it."""
+    """Conversation state: the message history and whether a document is
+    loaded for RAG. The frontend owns the Session, the engine is the only
+    one that changes it."""
     messages: list = field(default_factory=list)
     rag_ready: bool = False
 
 
 @dataclass
 class EngineConfig:
-    """Settings for a single turn. A frontend builds one of these from its
-    CLI flags or sidebar widgets, so values can change between turns of
-    the same conversation, for example when the user edits the model name
-    or uploads a document."""
+    """Per-turn settings. Built from CLI flags or sidebar widgets, so the
+    values can change between turns of one conversation."""
     model: str
     pre_query_web_search: bool = False
     search_engine: str = "tavily"
@@ -76,9 +66,8 @@ class EngineConfig:
 
 @dataclass
 class StreamResult:
-    """What a single streamed response contained, for the engine's internal
-    use: any text the model streamed, plus the name, id and raw JSON
-    arguments of a tool call if it made one."""
+    """What one streamed response contained: the text, plus the tool call
+    if the response made one."""
     text: str = ""
     tool_name: str | None = None
     tool_id: str | None = None
@@ -86,13 +75,11 @@ class StreamResult:
 
 
 def _looks_leaked(text):
-    """True when a supposed final answer is actually raw tool-call syntax
-    or a server error about one. Small models sometimes emit tool-call
-    text instead of using the proper protocol, and llama.cpp wraps calls
-    to unknown tools in an error message that arrives as ordinary
-    content. The marker matching is a heuristic; it can in principle
-    misfire on an answer that legitimately contains the word "function="
-    and stays until something better replaces it."""
+    """True when text is empty or looks like raw tool-call syntax or a
+    tool error rather than a real answer. Some models emit tool-call text
+    instead of using the protocol, and llama.cpp reports calls to unknown
+    tools as ordinary content. The markers are a heuristic, so an answer
+    that legitimately contains "function=" could trip it."""
     if not text or not text.strip():
         return True
     lowered = text.lower()
@@ -103,24 +90,22 @@ class Engine:
     """Runs conversation turns against one OpenAI-compatible endpoint."""
 
     def __init__(self, client, registry):
-        """`client` is an OpenAI client pointed at whatever endpoint the
-        user configured. `registry` supplies the tool schemas and executes
-        tool calls. Both are constructor arguments so tests can substitute
-        fakes and future frontends can share one engine across sessions."""
+        """`client` talks to the model endpoint, `registry` holds the
+        tools. Both are constructor arguments so tests can pass fakes."""
         self.client = client
         self.registry = registry
 
     def run_turn(self, session, user_input, config):
-        """Yields the events of one turn and updates the session in place.
-        Any failure is converted into a final Error event, after which the
-        session is still usable for the next turn."""
+        """Yields the events of one turn, updating the session along the
+        way. A failure becomes a final Error event; the session stays
+        usable for the next turn."""
         try:
             yield from self._turn(session, user_input, config)
         except Exception as e:
             yield Error(f"API request failed: {e}")
 
     def _turn(self, session, user_input, config):
-        self._sync_system_message(session)
+        self._sync_system_message(session, config)
         user_input, sources = yield from self._gather_context(user_input, session, config)
         session.messages.append({"role": "user", "content": user_input})
         tools = self.registry.schemas(
@@ -129,8 +114,8 @@ class Engine:
         try:
             stream = self._create(config, session.messages, tools)
         except Exception:
-            # The turn never really started, so the user message should
-            # not linger in the history. Both old frontends did this.
+            # The turn never started, so the user message should not
+            # linger in the history.
             session.messages.pop()
             raise
         answer = yield from self._tool_loop(session, config, tools, stream)
@@ -144,10 +129,9 @@ class Engine:
         yield TurnFinished(answer, sources)
 
     def _gather_context(self, user_input, session, config):
-        """Optional pre-query retrieval, decided by the user rather than
-        the model. Results are stitched into the user message exactly the
-        way the old frontends did, and a failure only costs the context:
-        the turn continues without it."""
+        """Fetches pre-query context (web search, always-on RAG) and wraps
+        it into the user message. A failure only drops the context; the
+        turn continues without it."""
         results, sources = [], []
         if config.pre_query_web_search:
             try:
@@ -156,9 +140,7 @@ class Engine:
             except Exception as e:
                 yield Status(f"Web search failed: {e}")
         if config.rag_mode == "always_on" and session.rag_ready:
-            # Imported here on purpose: semantic_engine loads a
-            # sentence-transformers model at import time, and only turns
-            # that actually query the document should pay for that.
+            # Imported here: semantic_engine pulls in a heavy model stack.
             from semantic_engine import search_query
             try:
                 _, passages = search_query(user_input, top_k=3)
@@ -177,11 +159,9 @@ class Engine:
         return user_input, sources
 
     def _tool_loop(self, session, config, tools, stream):
-        """The call-model / run-tool cycle. Each pass consumes one streamed
-        response: plain text means the model answered and the loop ends,
-        while a tool call goes through the registry, into the history, and
-        back to the model for another pass. Returns the final answer, or
-        None when the tool budget ran out first."""
+        """Cycles between calling the model and running the tool it asked
+        for, until the model answers in plain text or the tool budget runs
+        out. Returns the answer, or None if the budget was exhausted."""
         count = 0
         cache = {}
         while True:
@@ -225,11 +205,10 @@ class Engine:
             stream = self._create(config, session.messages, tools)
 
     def _final_no_tools(self, session, config, leaked_answer=None):
-        """Streams one last response with tools removed from the request.
-        Called when the tool budget is exhausted, and a second time when
-        the model still tried to call a tool instead of answering. The
-        extra instructions are appended to a throwaway copy of the history
-        so they never pollute the real conversation."""
+        """Streams one last response with no tools offered. Used when the
+        tool budget is exhausted, and again if the model still tried to
+        call a tool instead of answering. The instruction messages go on a
+        copy of the history, so the real conversation stays clean."""
         messages = list(session.messages)
         messages.append({"role": "user", "content": FINAL_ANSWER_INSTRUCTION})
         if leaked_answer is not None:
@@ -250,11 +229,10 @@ class Engine:
         )
 
     def _consume(self, stream):
-        """Reads one streamed response, yielding an AssistantDelta for
-        every piece of text, and returns what the response contained.
-        Keep-alive chunks with no choices are skipped (vLLM sends those),
-        and if the model emits several tool calls at once only the first
-        is kept, which is what the old frontends did."""
+        """Reads one streamed response, yielding an AssistantDelta per
+        chunk of text. Chunks with no choices (vLLM keep-alives) are
+        skipped, and of several parallel tool calls only the first is
+        kept."""
         result = StreamResult()
         first_index = None
         seen_parallel = set()
@@ -282,14 +260,17 @@ class Engine:
                 yield AssistantDelta(delta.content)
         return result
 
-    def _sync_system_message(self, session):
-        """Keeps the first history entry a system prompt that matches the
-        tools actually available. The old Gradio frontend rebuilt this on
-        every turn because a PDF can be uploaded mid-conversation; doing
-        it in the engine gives both frontends the same behavior."""
+    def _sync_system_message(self, session, config):
+        """Keeps the system prompt in sync with the session. Rebuilt every
+        turn because a PDF can be uploaded mid-conversation, and the tool
+        limit in the text comes from the config so it cannot drift from
+        the limit the engine enforces."""
         system = {
             "role": "system",
-            "content": build_system_message(include_local_rag=session.rag_ready),
+            "content": build_system_message(
+                include_local_rag=session.rag_ready,
+                max_tool_calls=config.max_tool_calls,
+            ),
         }
         if not session.messages:
             session.messages.append(system)

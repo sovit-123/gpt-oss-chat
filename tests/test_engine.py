@@ -1,10 +1,8 @@
 """Engine tests against a scripted fake model: no server, no network.
 
-The FakeModel plays scripted responses, one per API call, where each
-response is a list of stream chunks shaped like real OpenAI stream
-events. Everything the engine does is verified through three channels:
-the events it yields, the history it leaves in the Session, and the
-requests the FakeModel recorded.
+Each scripted response is a list of chunks shaped like real OpenAI stream
+events. Tests check the yielded events, the history left in the Session,
+and the requests the fake model recorded.
 """
 
 import sys
@@ -18,8 +16,8 @@ from core.events import (
 
 
 class FakeStream:
-    """Iterates over scripted chunks; the engine reads it exactly like a
-    real OpenAI stream object."""
+    """Iterable of scripted chunks; the engine reads it like a real
+    stream."""
     def __init__(self, chunks):
         self._iter = iter(chunks)
 
@@ -31,9 +29,9 @@ class FakeStream:
 
 
 class FakeModel:
-    """Stand-in for an OpenAI client. `responses` is a list of scripted
-    responses, consumed in order, one per create() call. Running out of
-    scripts raises, which conveniently doubles as a failure case."""
+    """Stands in for the OpenAI client. `responses` are consumed one per
+    create() call; running out of scripts raises, which doubles as a
+    failure case."""
     def __init__(self, responses):
         self.responses = [list(r) for r in responses]
         self.requests = []
@@ -51,8 +49,8 @@ class FakeModel:
 
 
 class FakeRegistry:
-    """Stand-in for core.registry.ToolRegistry with the same contract:
-    schemas() lists available tools, execute() never raises."""
+    """Stands in for core.registry.ToolRegistry: schemas() lists tools,
+    execute() never raises."""
     def __init__(self, impls):
         self.impls = impls
         self.calls = []
@@ -87,9 +85,8 @@ def keepalive():
 
 
 def make_engine(responses, impls):
-    """Builds an Engine wired to fakes and hands back all three objects,
-    because most tests also want to inspect the registry or the requests
-    the model recorded."""
+    """Engine wired to fakes, plus the fake model and registry, since most
+    tests inspect one of them."""
     model = FakeModel(responses)
     registry = FakeRegistry(impls)
     return Engine(model, registry), model, registry
@@ -116,8 +113,8 @@ def tool_names(request):
     return [t["function"]["name"] for t in request["tools"]]
 
 
-# All four tool names present, so visibility tests can observe local_rag
-# appearing and disappearing from the request the engine sends.
+# All four tools, so tests can watch local_rag appear and disappear
+# from requests.
 FOUR_TOOLS = {name: (lambda **kwargs: "ok") for name in
               ("search_web", "local_rag", "url_search", "code_search")}
 
@@ -166,8 +163,8 @@ def test_duplicate_tool_call_is_served_from_cache():
 
 
 def test_budget_exhaustion_forces_answer_without_extra_request():
-    # Five distinct calls: identical ones would be served from the dedup
-    # cache and never reach the registry, which is a different test.
+    # Five distinct calls, or the dedup cache would serve them and they
+    # would never reach the registry.
     calls = [
         tool_chunks("search_web", f'{{"topic": "q{i}", "search_engine": "tavily"}}')
         for i in range(5)
@@ -184,8 +181,7 @@ def test_budget_exhaustion_forces_answer_without_extra_request():
     assert forced["tools"] is None
     assert forced["messages"][-1]["content"].startswith("SYSTEM NOTE")
     assert finished(events).answer == "final answer"
-    # Exactly six requests: five tool passes plus one forced answer. The
-    # old code fired a seventh it never read.
+    # Exactly six requests: five tool passes plus one forced answer.
     assert len(model.requests) == 6
     # The forcing instruction must not persist in the real history.
     assert not any(m.get("content", "").startswith("SYSTEM NOTE") for m in session.messages)
@@ -233,8 +229,8 @@ def test_pre_query_web_search_injects_context(monkeypatch):
 
 
 def test_rag_always_on_uses_document_search(monkeypatch):
-    # A fake semantic_engine module keeps the heavy sentence-transformers
-    # stack out of the test suite; the engine's lazy import picks it up.
+    # Fake semantic_engine module keeps the heavy sentence-transformers
+    # stack out of the tests; the engine's lazy import picks it up.
     fake = types.ModuleType("semantic_engine")
     fake.search_query = lambda query, top_k=3: (None, ["doc chunk one"])
     monkeypatch.setitem(sys.modules, "semantic_engine", fake)

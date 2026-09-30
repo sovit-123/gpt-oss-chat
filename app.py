@@ -347,10 +347,9 @@ h1, h2, h3, h4 {
 
 
 def process_pdf(file, session):
-    """Ingests the uploaded PDF into the in-memory vector collection and
-    marks the session as RAG-ready, which unlocks the local_rag tool.
-    semantic_engine is imported here, not at the top, so the web UI
-    starts without loading the embedding model."""
+    """Reads the uploaded PDF into the Qdrant collection and marks the
+    session RAG-ready, which unlocks the local_rag tool. semantic_engine
+    is imported here to keep startup light."""
     if file is None:
         return "No file uploaded", session
     try:
@@ -368,16 +367,16 @@ def process_pdf(file, session):
 
 def chat(message, history, session, api_url, model_name,
          enable_web_search, search_engine, rag_mode):
-    """Runs one turn through the engine and renders its events into the
-    Gradio history as they arrive. `history` is display only; the real
-    conversation lives in the session, and only the engine touches it."""
+    """Runs one turn and appends the engine's events to the chat as they
+    arrive. `history` is display only; the real conversation lives in the
+    session."""
     if not message.strip():
         yield history, "", session
         return
 
-    # API URL and model are live widgets, so the client and engine are
-    # rebuilt on every turn; the session still carries the conversation.
-    client = OpenAI(base_url=api_url, api_key=API_KEY)
+    # The client is rebuilt every turn because the URL and model widgets
+    # can change. The 120s timeout replaces the SDK's ten-minute default.
+    client = OpenAI(base_url=api_url, api_key=API_KEY, timeout=120.0)
     engine = Engine(client, default_registry())
     config = EngineConfig(
         model=model_name,
@@ -417,19 +416,19 @@ def chat(message, history, session, api_url, model_name,
             content = event.answer
             if event.sources:
                 content += f"\n\n---\n*Sources: {', '.join(event.sources)}*"
-            # Overwrite with the canonical answer: on the leaked-text
-            # retry path this replaces the garbage that streamed.
+            # Replace with the canonical answer; on the leaked-text retry
+            # path this drops the garbage that streamed.
             history[bubble] = {"role": "assistant", "content": content}
             yield history, "", session
         elif isinstance(event, Error):
             history.append({"role": "assistant", "content": f"**Error:** {event.message}"})
             yield history, "", session
-        # ToolResult is deliberately not rendered: results go back to the
-        # model, and the old UI never displayed them either.
+        # Tool results are not displayed; the model consumes them, not
+        # the user.
 
 
 def clear_chat():
-    """Starts a fresh conversation: empty display, fresh session."""
+    """Clears the display and starts a fresh session."""
     return [], "", Session()
 
 
