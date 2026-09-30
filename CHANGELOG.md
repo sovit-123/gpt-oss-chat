@@ -12,12 +12,13 @@ and merged sections are never edited again. Format loosely follows
 
 ### Added
 - Chat engine, tool registry, and the project's first test suite in
-  `core/` — the engine now drives the terminal UI and will drive the
-  web UI next.
+  `core/` — one engine now drives both frontends.
 
 ### Changed
 - Terminal UI is now a thin renderer over the shared engine; CLI flags
   and behavior unchanged.
+- Web UI is now a thin renderer over the shared engine, like the
+  terminal UI before it.
 - Terminal chats start faster: the embedding model now loads only when
   a PDF is actually passed.
 
