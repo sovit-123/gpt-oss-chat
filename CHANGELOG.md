@@ -19,8 +19,8 @@ and merged sections are never edited again. Format loosely follows
   and behavior unchanged.
 - Web UI is now a thin renderer over the shared engine, like the
   terminal UI before it.
-- Terminal chats start faster: the embedding model now loads only when
-  a PDF is actually passed.
+- Both UIs start faster: the embedding model now loads on first document
+  query instead of at import time.
 
 ### Fixed
 - `--rag-tool` with a bad path printed "PDF file not found: None"; it
