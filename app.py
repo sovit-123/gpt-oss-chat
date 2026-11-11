@@ -551,8 +551,12 @@ with gr.Blocks(
                     lines=1,
                     max_lines=6,
                 )
-                submit_btn = gr.Button("Send", variant="primary", scale=1)
-                clear_btn = gr.Button("Clear Chat", variant="secondary", scale=1)
+                submit_btn = gr.Button(
+                    "Send", variant="primary", size="sm", scale=0, min_width=80,
+                )
+                clear_btn = gr.Button(
+                    "Clear Chat", variant="secondary", size="sm", scale=0, min_width=110,
+                )
 
         # Settings sidebar
         with gr.Column(scale=1, elem_id="sidebar"):
