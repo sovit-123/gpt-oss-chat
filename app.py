@@ -43,8 +43,8 @@ html, body {
     background-color: #121212 !important;
     font-family: 'Fira Code', 'Ubuntu Mono', 'Consolas', 'Monaco', monospace !important;
     max-width: 100% !important;
+    min-height: 100vh !important;
     height: 100vh !important;
-    height: 100dvh !important;
     overflow: hidden !important;
     padding: 8px 16px !important;
     display: flex !important;
@@ -83,26 +83,29 @@ html, body {
     flex-direction: row !important;
     flex: 1 1 auto !important;
     min-height: 0 !important;
-    height: auto !important;
+    height: calc(100vh - 140px) !important;
+    max-height: calc(100vh - 140px) !important;
     align-items: stretch !important;
 }
 
 #chat-column {
+    display: flex !important;
+    flex-direction: column !important;
     position: relative !important;
+    min-width: 0 !important;
     min-height: 0 !important;
     height: 100% !important;
+    max-height: 100% !important;
     overflow: hidden !important;
 }
 
-/* Full-viewport chat area: chat expands, input row stays visible */
+/* Keep the chat content inside the remaining viewport and keep the footer fixed */
 #chatbox {
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 96px !important;
-    height: auto !important;
-    min-height: 0 !important;
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    height: calc(100% - 92px) !important;
+    min-height: 220px !important;
+    max-height: calc(100% - 92px) !important;
     overflow: hidden !important;
 }
 
@@ -122,7 +125,8 @@ html, body {
 }
 
 #chat-input-row {
-    position: absolute !important;
+    flex: 0 0 auto !important;
+    position: sticky !important;
     left: 0 !important;
     right: 0 !important;
     bottom: 0 !important;
@@ -130,8 +134,8 @@ html, body {
     padding: 0 !important;
     min-height: 0 !important;
     overflow: visible !important;
-    z-index: 20 !important;
-    background-color: #121212 !important;
+    z-index: 1 !important;
+    background-color: transparent !important;
 }
 
 #chat-input-row .block {
@@ -139,9 +143,26 @@ html, body {
 }
 
 #sidebar {
+    display: flex !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
     height: 100% !important;
+    min-width: 0 !important;
     min-height: 0 !important;
     overflow-y: auto !important;
+    overflow-x: hidden !important;
+}
+
+#sidebar > *,
+#sidebar .block,
+#sidebar .form {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+#sidebar > * {
+    flex-shrink: 0 !important;
 }
 
 footer {
@@ -265,6 +286,45 @@ textarea, input[type="text"] {
     color: #ffffff !important;
     border: 1px solid #333333 !important;
     font-family: 'Fira Code', 'Ubuntu Mono', monospace !important;
+    resize: none !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    max-height: 140px !important;
+    overflow-y: auto !important;
+    line-height: 1.4 !important;
+    box-sizing: border-box !important;
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+}
+
+#chat-input-row {
+    display: flex !important;
+    align-items: flex-end !important;
+    gap: 8px !important;
+    flex-wrap: nowrap !important;
+    height: auto !important;
+    min-height: 52px !important;
+}
+
+#chat-input-row > div {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    height: auto !important;
+}
+
+#chat-input-row textarea,
+#chat-input-row .gr-textarea,
+#chat-input-row .gr-textbox,
+#chat-input-row textarea[rows],
+#chat-input-row .gr-textbox textarea,
+#chat-input-row .gr-textarea textarea {
+    height: 42px !important;
+    min-height: 42px !important;
+    max-height: 140px !important;
+    overflow-y: auto !important;
+    resize: none !important;
+    display: block !important;
+    box-sizing: border-box !important;
 }
 
 /* Buttons */
@@ -489,9 +549,14 @@ with gr.Blocks(
                     scale=4,
                     show_label=False,
                     lines=1,
+                    max_lines=6,
                 )
-                submit_btn = gr.Button("Send", variant="primary", scale=1)
-                clear_btn = gr.Button("Clear Chat", variant="secondary", scale=1)
+                submit_btn = gr.Button(
+                    "Send", variant="primary", size="sm", scale=0, min_width=80,
+                )
+                clear_btn = gr.Button(
+                    "Clear Chat", variant="secondary", size="sm", scale=0, min_width=110,
+                )
 
         # Settings sidebar
         with gr.Column(scale=1, elem_id="sidebar"):
